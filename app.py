@@ -17,6 +17,12 @@ from rag import (EMBED_MODEL, PROJECT_DIR, RERANK_MODEL, KnowledgeBase, answer, 
                  make_mock_exam, make_quiz, read_pages, study_plan, transcribe_answer)
 
 load_dotenv(PROJECT_DIR / ".env")
+try:  # online (Streamlit Cloud): keys come from the app's Secrets box
+    for key, value in st.secrets.items():
+        if isinstance(value, str):
+            os.environ.setdefault(key, value)
+except Exception:  # no secrets file locally -> .env is used
+    pass
 st.set_page_config(page_title="AI Exam Prep Assistant", page_icon=":material/school:", layout="wide")
 
 # Dark purple "glass" theme. Streamlit's own colours are set in .streamlit/config.toml;
@@ -190,8 +196,9 @@ GRAD_CAP_SVG = """
   <circle cx="74" cy="58" r="3" fill="#fde68a"/>
 </svg></div>"""
 GRAD_CAP_SVG = " ".join(line.strip() for line in GRAD_CAP_SVG.splitlines())  # one line for markdown
-SUGGESTIONS = ["Explain PEAS with an example", "What are the types of agents?",
-               "Difference between BFS and DFS", "What is knowledge representation?"]
+SUGGESTIONS = ["Summarise my notes in 10 points", "What are the most important topics?",
+               "Explain the hardest concept simply", "What questions might come in the exam?"]
+TIPS = ["Summarise my notes", "Important topics", "Likely exam questions"]
 
 
 @st.cache_resource(show_spinner="Loading AI models (first start takes ~1 minute)...")
@@ -391,6 +398,21 @@ with st.container(border=True):
     st.segmented_control("Section", PAGES, key="page", label_visibility="collapsed")
 st.write("")
 
+# New visitors have no notes yet: make uploading them the obvious first step
+# (the sidebar uploader is hidden behind a button on phones).
+if not st.session_state.files and page != PLAN:
+    with st.container(border=True):
+        st.markdown("#### :material/upload_file: Add your notes to get started")
+        st.caption("Upload your class notes as PDF — typed or photographed handwritten pages both "
+                   "work. Everything (answers, quizzes, mock exams, flashcards) comes from them.")
+        for f in st.file_uploader("Notes (PDF)", type="pdf", accept_multiple_files=True,
+                                  key="main_upload", label_visibility="collapsed") or []:
+            add_pdf(f.name, f.getvalue())
+        if st.session_state.files:
+            st.rerun()
+    if page != HOME:
+        st.stop()
+
 
 # ---------- Overview: dashboard ----------
 
@@ -526,7 +548,7 @@ if page == HOME:
         with st.container(border=True):
             st.markdown("#### AI Assistant")
             st.markdown("<div class='orb'></div>", unsafe_allow_html=True)
-            st.pills("Tips", ["Explain PEAS", "Types of agents", "BFS vs DFS"], key="dash_tip",
+            st.pills("Tips", TIPS, key="dash_tip",
                      label_visibility="collapsed",
                      on_change=lambda: (go(ASK, pending_question=st.session_state.dash_tip),
                                         st.session_state.update(dash_tip=None)))

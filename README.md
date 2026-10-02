@@ -6,8 +6,9 @@ Turn your course notes — **even handwritten, photographed ones** — into a pe
   your exam date, quiz points & accuracy, units-completed ring, recent quizzes with *Continue*,
   and an AI assistant box.
 - 👋 **Personal profiles**: every visitor enters their name on a welcome screen and gets their
-  own dashboard ("Hi, Priya!"). Progress is saved per student in `profiles/<id>.json`; the id is
-  kept in the page link, so bookmarking it brings you back. *Switch user* in the sidebar.
+  own dashboard ("Hi, Priya!"). Progress is saved per student (in Supabase online, or
+  `profiles/<id>.json` locally); the id is kept in the page link, so bookmarking it brings you
+  back. *Switch user* in the sidebar.
 
 - 💬 **Ask** questions and get answers written *only* from your notes, with page numbers
 - 📝 **Quiz** yourself with MCQs generated from your notes and fact-checked by a second AI pass
@@ -99,17 +100,32 @@ the local models load.
 
 ## Deploy (free)
 
-**Streamlit Community Cloud**: push this repo to GitHub → [share.streamlit.io](https://share.streamlit.io)
-→ *Create app* → pick the repo and `app.py` → *Advanced settings → Secrets*:
+**1. Streamlit Community Cloud** — [share.streamlit.io](https://share.streamlit.io) → sign in
+with GitHub → *Create app* → repo `exam-prep-ai`, branch `main`, file `app.py` →
+*Advanced settings*: Python **3.13**, and paste [`.streamlit/secrets.toml.example`](.streamlit/secrets.toml.example)
+into *Secrets* with your values → *Deploy*. The first build takes ~5-10 minutes.
 
-```toml
-GEMINI_API_KEY = "your-key"
-# If the app runs out of memory, use the smaller re-ranker:
-# RERANK_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+**2. Keep profiles (optional, recommended)** — the free server's disk is wiped on every restart.
+Create a free project at [supabase.com](https://supabase.com), open *SQL Editor*, run:
+
+```sql
+create table profiles (
+  id text primary key,
+  data jsonb not null,
+  updated_at timestamptz default now()
+);
+alter table profiles enable row level security;  -- only the server key can read/write
 ```
 
+Then add `SUPABASE_URL` (Project Settings → API → Project URL) and `SUPABASE_KEY`
+(the **service_role** key — it stays on the server, never in the browser) to the app's Secrets.
+
+**Notes:** each visitor uploads their own notes; nothing in `*.pdf`, `notes_text/`, `profiles/`
+or `.env` is ever committed. The app uses your Gemini key for everyone, so keep it on the free
+tier (no billing) to avoid any cost.
+
 **Hugging Face Spaces** (more RAM) works too: create a Docker/Streamlit Space, upload these
-files and add `GEMINI_API_KEY` as a secret.
+files and add the same secrets.
 
 ## Learning path (`levels/`)
 
