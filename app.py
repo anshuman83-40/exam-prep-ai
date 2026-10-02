@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from sentence_transformers import CrossEncoder, SentenceTransformer
 
 from rag import (EMBED_MODEL, PROJECT_DIR, RERANK_MODEL, KnowledgeBase, answer, extract_questions,
-                 find_topics, make_chunks, make_quiz, read_pages)
+                 extract_syllabus, find_topics, make_chunks, make_quiz, read_pages, study_plan)
 
 load_dotenv(PROJECT_DIR / ".env")
 st.set_page_config(page_title="AI Exam Prep Assistant", page_icon="📚", layout="centered")
@@ -28,7 +28,8 @@ if not os.getenv("GEMINI_API_KEY"):
     st.error("GEMINI_API_KEY is missing. Copy .env.example to .env and add your key.")
     st.stop()
 
-PAGES = ["💬 Ask", "📝 Quiz", "🎯 Important topics"]
+PAGES = ["💬 Ask", "📝 Quiz", "🎯 Important topics", "🗺️ Study plan"]
+PRIORITY_ICON = {"High": "🔴 High", "Medium": "🟡 Medium", "Low": "🟢 Low"}
 SUGGESTIONS = ["Explain PEAS with an example", "What are the types of agents?",
                "Difference between BFS and DFS", "What is knowledge representation?"]
 
@@ -47,22 +48,28 @@ if "kb" not in st.session_state:
 kb: KnowledgeBase = st.session_state.kb
 
 
+def read_with_progress(name: str, data: bytes) -> list[str]:
+    """read_pages() with a progress bar while scanned pages are OCR'd."""
+    bar = st.progress(0.0, text=f"Reading {name}...")
+
+    def progress(done, total):
+        bar.progress(done / total, text=f"Reading scanned page {done}/{total} of {name}...")
+
+    pages = read_pages(data, progress)
+    bar.empty()
+    return pages
+
+
 def add_pdf(name: str, data: bytes):
     """Read a PDF (OCR if needed), chunk it and add it to the knowledge base."""
     if name in st.session_state.files:
         return
-    bar = st.progress(0.0, text=f"Reading {name}...")
-
-    def progress(done, total):
-        bar.progress(done / total, text=f"Reading handwritten page {done}/{total} of {name}...")
-
-    pages = read_pages(data, progress)
+    pages = read_with_progress(name, data)
     chunks = make_chunks(pages, name)
     kb.add(chunks)
     st.session_state.files[name] = {"pages": len(pages), "chunks": len(chunks)}
     st.session_state.docs[name] = (data, pages)
     st.session_state.pop("topics", None)  # new file -> topic analysis is out of date
-    bar.empty()
 
 
 # ---------- helpers ----------
@@ -358,3 +365,150 @@ if page == PAGES[2]:
                         marks = f" :orange-badge[{q['marks']} marks]" if q["marks"] else ""
                         st.markdown(f"- {plain(q['question'])}{marks} "
                                     f":gray-badge[{q['source']} · p. {q['page']}]")
+
+
+# ---------- 🗺️ Study plan: syllabus + PYQs -> which chapter first, with weightage ----------
+
+if page == PAGES[3]:
+    st.session_state.setdefault("plan_syllabus", None)  # (file name, pdf bytes)
+    st.session_state.setdefault("plan_pyqs", {})  # file name -> pdf bytes
+    # PDFs in the syllabus/ and pyqs/ folders are picked up automatically
+    for pdf in sorted((PROJECT_DIR / "syllabus").glob("*.pdf"))[:1]:
+        if st.session_state.plan_syllabus is None:
+            st.session_state.plan_syllabus = (pdf.name, pdf.read_bytes())
+    for pdf in sorted((PROJECT_DIR / "pyqs").glob("*.pdf")):
+        st.session_state.plan_pyqs.setdefault(pdf.name, pdf.read_bytes())
+
+    with st.container(border=True):
+        st.markdown("#### 🗺️ Which chapter should I start with?")
+        st.caption("Upload your course handout/syllabus and previous year papers (PYQs). "
+                   "Each PYQ question is matched to a syllabus unit to work out its weightage. "
+                   "Scanned papers work too.")
+        c1, c2 = st.columns(2)
+        syl = c1.file_uploader("1️⃣ Course handout / syllabus", type="pdf", key="syl_up")
+        pyqs = c2.file_uploader("2️⃣ Previous year papers (PYQs)", type="pdf",
+                                accept_multiple_files=True, key="pyq_up")
+        if syl:
+            st.session_state.plan_syllabus = (syl.name, syl.getvalue())
+        for f in pyqs or []:
+            st.session_state.plan_pyqs[f.name] = f.getvalue()
+
+        if st.session_state.plan_syllabus or st.session_state.plan_pyqs:
+            chips = []
+            if st.session_state.plan_syllabus:
+                chips.append(f":violet-badge[📘 {st.session_state.plan_syllabus[0]}]")
+            chips += [f":blue-badge[📄 {n}]" for n in st.session_state.plan_pyqs]
+            st.markdown(" ".join(chips))
+            if st.button("Clear files", key="plan_clear"):
+                st.session_state.plan_syllabus, st.session_state.plan_pyqs = None, {}
+                st.session_state.pop("plan", None)
+                st.rerun()
+
+        build = st.button("📊 Build my study plan", type="primary", width="stretch",
+                          disabled=st.session_state.plan_syllabus is None)
+        if st.session_state.plan_syllabus is None:
+            st.caption("⬆️ Add a syllabus first. PYQs are optional but give real weightage.")
+
+    if build:
+        try:
+            name, data = st.session_state.plan_syllabus
+            with st.spinner("Reading the syllabus units..."):
+                syllabus = extract_syllabus(data, read_with_progress(name, data))
+            papers = {}
+            n_papers = len(st.session_state.plan_pyqs)
+            for i, (pname, pdata) in enumerate(st.session_state.plan_pyqs.items(), start=1):
+                with st.spinner(f"Finding questions in paper {i}/{n_papers}..."):
+                    papers[pname] = extract_questions(pdata, read_with_progress(pname, pdata), pname)
+            with st.spinner("Matching every question to a syllabus unit..."):
+                st.session_state.plan = study_plan(syllabus, papers)
+        except Exception as e:
+            st.error(f"⚠️ Couldn't build the plan: {e}")
+
+    plan = st.session_state.get("plan")
+    if plan and not plan["rows"]:
+        st.warning("No units found in that file. Is it the course handout/syllabus?")
+    elif plan:
+        rows = plan["rows"]
+        if plan["course"]:
+            st.markdown(f"##### 📘 {plan['course']}")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Units", len(rows))
+        m2.metric("PYQ papers", plan["papers"])
+        m3.metric("Questions", plan["n_questions"])
+        m4.metric("Marks analysed", plan["total_marks"])
+
+        top = rows[0]
+        if plan["basis"] == "pyq":
+            st.success(f"Start with **Unit {top['unit']}: {top['title']}** — "
+                       f"{top['weightage']:.0%} of the PYQ "
+                       f"{'marks' if plan['use_marks'] else 'questions'}.", icon="🥇")
+        elif plan["basis"] == "hours":
+            st.info("No PYQs added, so units are ranked by **lecture hours**. "
+                    "Add previous year papers for real exam weightage.", icon="ℹ️")
+        else:
+            st.info("No PYQs or lecture hours found, so units are in **syllabus order**. "
+                    "Add previous year papers for real exam weightage.", icon="ℹ️")
+
+        weight_label = ("PYQ weightage" if plan["basis"] == "pyq" else
+                        "Lecture-hour share" if plan["basis"] == "hours" else "Weightage")
+        table = pd.DataFrame([{
+            "#": r["order"],
+            "Unit": f"{r['unit']}. {r['title']}",
+            "Priority": PRIORITY_ICON[r["priority"]],
+            weight_label: r["weightage"] * 100,
+            "PYQ marks": r["marks"],
+            "Asked in": f"{r['asked_in']}/{plan['papers']}" if plan["papers"] else "—",
+            "Hours": r["hours"] or None,
+        } for r in rows])
+        if plan["basis"] == "pyq":
+            table = table.drop(columns="Hours")
+        else:
+            table = table.drop(columns=["PYQ marks", "Asked in"])
+        st.dataframe(
+            table, hide_index=True, width="stretch", height=35 * (len(table) + 1) + 3,
+            column_config={
+                "#": st.column_config.NumberColumn(width=40),
+                "Unit": st.column_config.TextColumn(width="medium"),
+                "Priority": st.column_config.TextColumn(width=95),
+                weight_label: st.column_config.ProgressColumn(
+                    weight_label, format="%.0f%%", min_value=0, max_value=100, width=130),
+                "PYQ marks": st.column_config.NumberColumn("Marks", width=60),
+                "Asked in": st.column_config.TextColumn("Papers", width=60,
+                                                        help="Asked in how many of the papers"),
+                "Hours": st.column_config.NumberColumn(format="%d h", width=60),
+            },
+        )
+        csv = table.assign(Why=[r["why"] for r in rows], Topics=[", ".join(r["topics"]) for r in rows])
+        st.download_button("⬇️ Download table (CSV)", csv.to_csv(index=False).encode("utf-8-sig"),
+                           "study_plan.csv", "text/csv")
+
+        if plan["basis"] == "pyq":
+            chart = alt.Chart(table).mark_arc(innerRadius=60).encode(
+                theta=alt.Theta(f"{weight_label}:Q"),
+                color=alt.Color("Unit:N", legend=alt.Legend(orient="right", labelLimit=260)),
+                tooltip=["Unit", alt.Tooltip(f"{weight_label}:Q", format=".0f"), "PYQ marks"],
+            ).properties(height=260, title="Share of PYQ marks by unit")
+            st.altair_chart(chart, width="stretch")
+
+        st.markdown("##### Unit by unit")
+        for r in rows:
+            with st.container(border=True):
+                c1, c2 = st.columns([4, 2], vertical_alignment="center")
+                c1.markdown(f"**#{r['order']} · Unit {r['unit']}: {r['title']}**  \n"
+                            f"{PRIORITY_ICON[r['priority']]} · {r['why']}")
+                b1, b2 = c2.columns(2)
+                b1.button("📝 Quiz", key=f"pq{r['unit']}", width="stretch",
+                          on_click=go, args=(PAGES[1],), kwargs={"auto_quiz_topic": r["title"]})
+                b2.button("💬 Explain", key=f"pe{r['unit']}", width="stretch", on_click=go,
+                          args=(PAGES[0],),
+                          kwargs={"pending_question": f"Summarise {r['title']} for my exam"})
+                with st.expander(f"Topics & {r['n_questions']} PYQ question(s)"):
+                    st.markdown("**Topics:** " + ", ".join(plain(t) for t in r["topics"]))
+                    for q in r["questions"]:
+                        marks = f" :orange-badge[{q['marks']} marks]" if q["marks"] else ""
+                        st.markdown(f"- {plain(q['question'])}{marks} :gray-badge[{q['paper']}]")
+
+        if plan["unmapped"]:
+            with st.expander(f"⚠️ {len(plan['unmapped'])} question(s) didn't match any unit"):
+                for q in plan["unmapped"]:
+                    st.markdown(f"- {plain(q['question'])} :gray-badge[{q['paper']}]")
