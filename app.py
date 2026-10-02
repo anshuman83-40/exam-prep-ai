@@ -384,7 +384,9 @@ page = st.session_state.get("page") or HOME  # clicking the selected button agai
 total_pages = sum(f["pages"] for f in st.session_state.files.values())
 
 with st.container(border=True):
-    c1, c2, c3 = st.columns([1.3, 2, 1.2], vertical_alignment="center")
+    c0, c1, c2, c3 = st.columns([.42, 1.3, 2, 1.2], vertical_alignment="center")
+    c0.button("", icon=":material/home:", key="home_btn", help="Home", type="primary",
+              on_click=go, args=(HOME,))
     c1.markdown(f"<div class='topbar-title'>{page.split(' ', 1)[1]}</div>", unsafe_allow_html=True)
     c2.text_input("Search", key="top_search", placeholder="Search your notes...",
                   label_visibility="collapsed", on_change=search_notes)
@@ -405,6 +407,10 @@ if not st.session_state.files and page != PLAN:
         st.markdown("#### :material/upload_file: Add your notes to get started")
         st.caption("Upload your class notes as PDF — typed or photographed handwritten pages both "
                    "work. Everything (answers, quizzes, mock exams, flashcards) comes from them.")
+        a, b = st.columns([3, 1.3], vertical_alignment="center")
+        a.caption("Have a course handout/syllabus or previous year papers? They go in Study plan.")
+        b.button("Open Study plan", icon=":material/map:", key="to_plan", width="stretch",
+                 on_click=go, args=(PLAN,))
         for f in st.file_uploader("Notes (PDF)", type="pdf", accept_multiple_files=True,
                                   key="main_upload", label_visibility="collapsed") or []:
             add_pdf(f.name, f.getvalue())
@@ -1033,14 +1039,24 @@ if page == PLAN:
             if st.button("Clear files", key="plan_clear"):
                 st.session_state.plan_syllabus, st.session_state.plan_pyqs = None, {}
                 st.session_state.pop("plan", None)
+                st.session_state.pop("plan_files", None)
                 st.rerun()
 
-        build = st.button("Build my study plan", icon=":material/analytics:", type="primary", width="stretch",
-                          disabled=st.session_state.plan_syllabus is None)
-        if st.session_state.plan_syllabus is None:
-            st.caption("Add a syllabus first. PYQs are optional but give real weightage.")
+        # The plan builds by itself whenever the uploaded files change (students kept
+        # uploading and waiting, not noticing a separate button); the button rebuilds on demand.
+        files_now = None
+        if st.session_state.plan_syllabus:
+            files_now = (st.session_state.plan_syllabus[0], *sorted(st.session_state.plan_pyqs))
+        rebuild = st.button("Rebuild study plan" if st.session_state.get("plan") else "Build my study plan",
+                            icon=":material/analytics:", type="primary", width="stretch",
+                            disabled=files_now is None)
+        if files_now is None:
+            st.caption("Add your syllabus first — the plan builds automatically. "
+                       "PYQs are optional but give real exam weightage.")
+    build = rebuild or (files_now is not None and files_now != st.session_state.get("plan_files"))
 
     if build:
+        st.session_state.plan_files = files_now
         try:
             name, data = st.session_state.plan_syllabus
             with st.spinner("Reading the syllabus units..."):
