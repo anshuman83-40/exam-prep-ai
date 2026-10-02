@@ -16,3 +16,5 @@ notes_text/
 
 # Your personal progress (quiz scores, exam date)
 progress.json
+profiles/
+progress.migrated.json
