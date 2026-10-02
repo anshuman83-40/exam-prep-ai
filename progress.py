@@ -1,14 +1,20 @@
 """Saves each student's progress (name, quiz scores, units done, exam date, plan, flashcards).
 
-Every student has their own profile file, profiles/<id>.json (kept out of git). The id is a
-random code kept in the page link (?u=<id>), so bookmarking the link brings you back.
+Every student has their own profile, identified by a random code kept in the page link
+(?u=<id>), so bookmarking the link brings you back. Profiles are stored:
+- in a Supabase database table when SUPABASE_URL and SUPABASE_KEY are set (online deploys,
+  where the server's disk is wiped on every restart), otherwise
+- as files in profiles/<id>.json (local use; kept out of git).
 """
 
 import json
 import math
+import os
 import re
 import uuid
 from datetime import date, datetime, timedelta
+
+import requests
 
 from rag import PROJECT_DIR
 
@@ -27,18 +33,45 @@ def _path(uid: str):
     return PROFILE_DIR / f"{uid}.json"
 
 
+def _supabase() -> tuple[str, dict] | None:
+    """(table URL, headers) for the Supabase REST API, or None to use local files."""
+    url, key = os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY")
+    if not (url and key):
+        return None
+    return (f"{url.rstrip('/')}/rest/v1/profiles",
+            {"apikey": key, "Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+
+
 def load(uid: str | None) -> dict | None:
     """The profile for this id, or None if the id is invalid or unknown."""
     if not valid_id(uid):
         return None
-    try:
-        saved = json.loads(_path(uid).read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
-        return None
-    return {**DEFAULTS, **saved, "id": uid}
+    db = _supabase()
+    if db:
+        table, headers = db
+        r = requests.get(table, headers=headers, timeout=10,
+                         params={"id": f"eq.{uid}", "select": "data"})
+        r.raise_for_status()
+        rows = r.json()
+        saved = rows[0]["data"] if rows else None
+    else:
+        try:
+            saved = json.loads(_path(uid).read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            saved = None
+    return {**DEFAULTS, **saved, "id": uid} if saved is not None else None
 
 
 def save(progress: dict):
+    db = _supabase()
+    if db:
+        table, headers = db
+        r = requests.post(table, timeout=10,
+                          headers={**headers, "Prefer": "resolution=merge-duplicates"},
+                          json={"id": progress["id"], "data": progress,
+                                "updated_at": datetime.now().astimezone().isoformat()})
+        r.raise_for_status()
+        return
     PROFILE_DIR.mkdir(exist_ok=True)
     _path(progress["id"]).write_text(json.dumps(progress, indent=1, ensure_ascii=False),
                                      encoding="utf-8")
