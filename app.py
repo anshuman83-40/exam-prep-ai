@@ -75,6 +75,8 @@ div[data-baseweb="input"], div[data-baseweb="textarea"], div[data-testid="stChat
   border-radius: 999px !important; background: rgba(255,255,255,.06) !important;
 }
 div[data-testid="stChatInput"] textarea { min-height: 0 !important; }
+/* hide Streamlit's "Press Enter to submit form · 0/60" hint: it overlaps the placeholder text */
+div[data-testid="InputInstructions"] { display: none !important; }
 
 /* dashboard pieces */
 .topbar-title { font-size: 2rem !important; font-weight: 700; line-height: 1.2; letter-spacing: .3px; }
@@ -224,7 +226,7 @@ if progress is None:
         with st.form("welcome", border=False):
             name = st.text_input("What's your name?", max_chars=40, placeholder="e.g. Priya")
             course = st.text_input("Course or subject (optional)", max_chars=60,
-                                   placeholder="e.g. B.Tech CSE · Artificial Intelligence")
+                                   placeholder="e.g. B.Tech CSE")
             go_in = st.form_submit_button("Get started", icon=":material/arrow_forward:",
                                           type="primary", width="stretch")
         if go_in:
