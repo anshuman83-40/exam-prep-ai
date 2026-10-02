@@ -591,3 +591,183 @@ def study_plan(syllabus: dict, papers: dict[str, list[dict]]) -> dict:
     return {"course": syllabus.get("course", ""), "rows": rows, "basis": basis,
             "papers": len(papers), "n_questions": len(questions), "total_marks":
             sum(q["marks"] for q in questions), "unmapped": unmapped, "use_marks": use_marks}
+
+
+# ---------- shared: pick note excerpts for a whole-syllabus task ----------
+
+def coverage_context(kb: KnowledgeBase, units: list[dict] | None = None,
+                     max_chunks: int = 18) -> list[Chunk]:
+    """Excerpts spread over the whole course: the best chunks for each study-plan unit
+    (more for high-weightage units) or, without a plan, chunks evenly spaced through the notes."""
+    if not kb.chunks:
+        return []
+    if units:
+        picked: list[Chunk] = []
+        for u in units:
+            per_unit = max(1, round(u.get("weightage", 0) * max_chunks)) if u.get("weightage") else 3
+            for c, _ in kb.search(u["title"], k=per_unit):
+                if c not in picked:
+                    picked.append(c)
+        return picked[: max_chunks + len(units)]
+    step = max(1, len(kb.chunks) // max_chunks)
+    return kb.chunks[::step][:max_chunks]
+
+
+def numbered(chunks: list[Chunk]) -> str:
+    return "\n\n".join(f"[{i}] ({c.source}, page {c.page})\n{c.text}"
+                       for i, c in enumerate(chunks, start=1))
+
+
+# ---------- Mock exam: generate a paper in the exam pattern, then grade written answers ----------
+
+class ExamQ(BaseModel):
+    question: str
+    marks: int
+    key_points: list[str] = Field(description="the points a full-marks answer must contain")
+    model_answer: str = Field(description="a concise full-marks answer written from the notes")
+    note_number: int = Field(description="the [n] note the question is mainly based on")
+
+
+class ExamPaper(BaseModel):
+    questions: list[ExamQ]
+
+
+MOCK_PROMPT = """You are setting a university exam paper. Using ONLY the numbered notes below,
+write questions in exactly this pattern:
+{pattern}
+- Short questions (1-3 marks): definitions, differences, one-line facts.
+- Long questions (5+ marks): explain / apply / compare / solve, like real end-semester questions.
+- Spread questions across as many different topics in the notes as possible; no repeats.
+- For each question give the key points a full-marks answer needs (about one point per
+  1-2 marks) and a concise model answer, both strictly from the notes.
+
+Notes:
+{context}"""
+
+
+class Grade(BaseModel):
+    question_number: int
+    marks_awarded: float
+    points_covered: list[str]
+    points_missed: list[str]
+    feedback: str = Field(description="one or two sentences of specific advice")
+
+
+class Grades(BaseModel):
+    grades: list[Grade]
+
+
+GRADE_PROMPT = """You are a fair university examiner. Mark each student answer against its
+key points and the notes. Give marks in steps of 0.5, never above the question's marks.
+Award marks for correct ideas in the student's own words; ignore spelling and grammar.
+A blank or irrelevant answer gets 0.
+
+Notes:
+{context}
+
+Questions, key points and student answers:
+{answers}"""
+
+
+def make_mock_exam(kb: KnowledgeBase, pattern: list[tuple[int, int]],
+                   units: list[dict] | None = None) -> dict:
+    """pattern = [(number of questions, marks each), ...] e.g. [(5, 2), (3, 10)]."""
+    chunks = coverage_context(kb, units)
+    if not chunks:
+        return {"questions": [], "chunks": []}
+    pattern_text = "\n".join(f"- {n} question(s) of {m} marks each" for n, m in pattern)
+    raw = generate(
+        get_client(), MOCK_PROMPT.format(pattern=pattern_text, context=numbered(chunks)),
+        config=types.GenerateContentConfig(response_mime_type="application/json",
+                                           response_schema=ExamPaper),
+    )
+    # keep the requested pattern exactly, even if the model wrote extra questions
+    pool = ExamPaper.model_validate_json(raw).questions
+    questions = []
+    for n, m in pattern:
+        same = [q for q in pool if q.marks == m][:n]
+        for q in same:
+            pool.remove(q)
+        questions += same
+    out = []
+    for q in questions:
+        c = chunks[q.note_number - 1] if 1 <= q.note_number <= len(chunks) else chunks[0]
+        out.append({**q.model_dump(), "source": c.source, "page": c.page})
+    return {"questions": out, "chunks": [(c.source, c.page, c.text) for c in chunks]}
+
+
+def transcribe_answer(image: bytes, mime: str) -> str:
+    """Read a photo of a handwritten answer (exam answers are handwritten)."""
+    part = types.Part.from_bytes(data=image, mime_type=mime)
+    prompt = ("Transcribe this handwritten exam answer exactly, keeping its structure. "
+              "Describe any diagram in one line as [Diagram: ...]. Output only the text.")
+    return generate(get_client(), [part, prompt]).strip()
+
+
+def grade_exam(exam: dict, answers: list[str]) -> list[dict]:
+    """Mark every written answer in one call. Returns per-question marks + feedback."""
+    context = "\n\n".join(f"[{i}] ({s}, page {p})\n{t}"
+                          for i, (s, p, t) in enumerate(exam["chunks"], start=1))
+    listing = json.dumps([
+        {"question_number": i, "question": q["question"], "marks": q["marks"],
+         "key_points": q["key_points"], "student_answer": a.strip() or "(blank)"}
+        for i, (q, a) in enumerate(zip(exam["questions"], answers), start=1)], ensure_ascii=False)
+    raw = generate(
+        get_client(), GRADE_PROMPT.format(context=context, answers=listing),
+        config=types.GenerateContentConfig(response_mime_type="application/json",
+                                           response_schema=Grades),
+    )
+    by_number = {g.question_number: g for g in Grades.model_validate_json(raw).grades}
+    results = []
+    for i, (q, a) in enumerate(zip(exam["questions"], answers), start=1):
+        g = by_number.get(i)
+        if not a.strip():  # never trust a model to give marks for nothing
+            results.append({"marks": 0.0, "covered": [], "missed": q["key_points"],
+                            "feedback": "Not attempted."})
+        elif g is None:
+            results.append({"marks": 0.0, "covered": [], "missed": [],
+                            "feedback": "Could not be graded, try again."})
+        else:
+            marks = min(max(round(g.marks_awarded * 2) / 2, 0), q["marks"])
+            results.append({"marks": marks, "covered": g.points_covered,
+                            "missed": g.points_missed, "feedback": g.feedback})
+    return results
+
+
+# ---------- Flashcards ----------
+
+class Card(BaseModel):
+    front: str = Field(description="a short question or term, max ~15 words")
+    back: str = Field(description="the answer, 1-3 short lines")
+    note_number: int
+
+
+class Cards(BaseModel):
+    cards: list[Card]
+
+
+CARDS_PROMPT = """Make {n} flashcards for revising "{topic}" from ONLY the numbered notes below.
+- One fact per card: definitions, differences, steps, formulas, examples.
+- Front: a short question or term. Back: a short, exact answer from the notes.
+- No duplicates, no trivial cards, nothing that isn't in the notes.
+
+Notes:
+{context}"""
+
+
+def make_flashcards(topic: str, kb: KnowledgeBase, n: int = 10) -> list[dict]:
+    hits = kb.search(topic, k=6)
+    if not hits:
+        return []
+    chunks = [c for c, _ in hits]
+    raw = generate(
+        get_client(), CARDS_PROMPT.format(n=n, topic=topic, context=numbered(chunks)),
+        config=types.GenerateContentConfig(response_mime_type="application/json",
+                                           response_schema=Cards),
+    )
+    out = []
+    for card in Cards.model_validate_json(raw).cards[:n]:
+        c = chunks[card.note_number - 1] if 1 <= card.note_number <= len(chunks) else chunks[0]
+        out.append({"front": card.front.strip(), "back": card.back.strip(), "topic": topic,
+                    "source": c.source, "page": c.page})
+    return out
