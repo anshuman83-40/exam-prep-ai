@@ -402,6 +402,7 @@ def search_notes():
 
 
 page = st.session_state.get("page") or HOME  # clicking the selected button again deselects it
+process_pending()  # read uploaded notes first: progress shows at the top of any page, counts stay right
 total_pages = sum(f["pages"] for f in st.session_state.files.values())
 
 with st.container(border=True):
@@ -413,15 +414,13 @@ with st.container(border=True):
                   label_visibility="collapsed", on_change=search_notes)
     initial = html.escape(progress["name"][:1].upper() or "S")
     c3.markdown(
-        f"<div style='text-align:right'><span class='chip'>{mi('description')} {total_pages} pages</span> "
+        f"<div style='text-align:right'><span class='chip'>{mi('description')} {total_pages} page{'s' if total_pages != 1 else ''}</span> "
         f"<span class='chip'><span class='avatar'>{initial}</span>"
         f"<span><b>{html.escape(progress['name'])}</b><br>"
         f"<small>{html.escape(progress.get('course') or 'Student')}</small></span></span></div>",
         unsafe_allow_html=True)
     st.segmented_control("Section", PAGES, key="page", label_visibility="collapsed")
 st.write("")
-
-process_pending()  # read any uploaded notes here, so progress shows on whichever page is open
 
 # New visitors have no notes yet: make uploading them the obvious first step
 # (the sidebar uploader is hidden behind a button on phones).
@@ -584,8 +583,9 @@ if page == HOME:
                                         st.session_state.update(dash_tip=None)))
             st.text_input("Ask", key="dash_ask", placeholder="Ask me about your notes...",
                           label_visibility="collapsed", on_change=ask_from_dashboard)
-            st.caption(f"Answers only from your {len(st.session_state.files)} file(s) · "
-                       f"{len(kb.chunks)} chunks, with page numbers.")
+            n_files = len(st.session_state.files)
+            st.caption(f"Answers only from your {n_files} file{'s' if n_files != 1 else ''} "
+                       f"({total_pages} page{'s' if total_pages != 1 else ''}), with page numbers.")
 
 
 # ---------- Ask: chat with your notes ----------
