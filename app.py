@@ -16,7 +16,7 @@ from rag import (EMBED_MODEL, PROJECT_DIR, RERANK_MODEL, KnowledgeBase, answer, 
                  extract_syllabus, find_topics, make_chunks, make_quiz, read_pages, study_plan)
 
 load_dotenv(PROJECT_DIR / ".env")
-st.set_page_config(page_title="AI Exam Prep Assistant", page_icon="📚", layout="wide")
+st.set_page_config(page_title="AI Exam Prep Assistant", page_icon=":material/school:", layout="wide")
 
 # Dark purple "glass" theme. Streamlit's own colours are set in .streamlit/config.toml;
 # this adds the gradient background, glass cards, pill buttons and the dashboard widgets.
@@ -104,6 +104,15 @@ div[data-testid="stChatInput"] textarea { min-height: 0 !important; }
 .slot { border-left: 2px solid rgba(167,139,250,.6); padding: .35rem .7rem; margin: .45rem 0;
         border-radius: 0 12px 12px 0; background: rgba(139,92,246,.10); }
 .slot small { opacity: .7; }
+.mi { font-family: 'Material Symbols Rounded' !important; font-weight: normal; font-style: normal;
+      font-size: 1.15em; line-height: 1; vertical-align: -0.22em; letter-spacing: normal;
+      text-transform: none; white-space: nowrap; direction: ltr; -webkit-font-smoothing: antialiased;
+      font-feature-settings: 'liga'; color: #c4b5fd; }
+.mi.done { color: #4ade80; }
+.dot { display:inline-block; width:.6rem; height:.6rem; border-radius:50%; margin-right:.2rem;
+       box-shadow: 0 0 8px currentColor; vertical-align: .05em; }
+.hello-art { text-align: right; }
+.hello-art svg { filter: drop-shadow(0 0 18px rgba(139,92,246,.6)); }
 
 /* phones: tighter spacing, smaller headings (Streamlit stacks columns below ~640px) */
 @media (max-width: 640px) {
@@ -125,9 +134,41 @@ if not os.getenv("GEMINI_API_KEY"):
     st.error("GEMINI_API_KEY is missing. Copy .env.example to .env and add your key.")
     st.stop()
 
-HOME, ASK, QUIZ, TOPICS, PLAN = ("🏠 Overview", "💬 Ask", "📝 Quiz", "🎯 Topics", "🗺️ Study plan")
+HOME, ASK, QUIZ, TOPICS, PLAN = (":material/dashboard: Overview", ":material/forum: Ask", ":material/quiz: Quiz",
+                                   ":material/insights: Topics", ":material/map: Study plan")
 PAGES = [HOME, ASK, QUIZ, TOPICS, PLAN]
-PRIORITY_ICON = {"High": "🔴 High", "Medium": "🟡 Medium", "Low": "🟢 Low"}
+PRIORITY_BADGE = {"High": ":red-badge[High]", "Medium": ":orange-badge[Medium]",
+                  "Low": ":green-badge[Low]"}
+PRIORITY_COLOR = {"High": "#f87171", "Medium": "#fbbf24", "Low": "#4ade80"}
+USER_AVATAR, BOT_AVATAR = ":material/person:", ":material/auto_awesome:"
+
+
+def mi(name: str, cls: str = "") -> str:
+    """A Material icon for use inside custom HTML (same icon set Streamlit uses)."""
+    return f"<span class='mi {cls}'>{name}</span>"
+
+
+def dot(priority: str) -> str:
+    return f"<span class='dot' style='background:{PRIORITY_COLOR[priority]}'></span>"
+
+
+# Greeting-card graphic: glowing graduation cap badge (replaces the emoji)
+GRAD_CAP_SVG = """
+<div class='hello-art'><svg viewBox="0 0 96 96" width="88" height="88" aria-hidden="true">
+  <defs>
+    <radialGradient id="g1" cx="35%" cy="30%" r="75%">
+      <stop offset="0" stop-color="#e9d5ff"/><stop offset=".45" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#3b0f86"/></radialGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="4" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <circle cx="48" cy="48" r="38" fill="url(#g1)" filter="url(#glow)"/>
+  <path d="M48 28 L76 40 L48 52 L20 40 Z" fill="#fff"/>
+  <path d="M32 46 V58 C32 64 64 64 64 58 V46 L48 53 Z" fill="#f5f3ff" opacity=".92"/>
+  <path d="M74 41 V56" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="74" cy="58" r="3" fill="#fde68a"/>
+</svg></div>"""
+GRAD_CAP_SVG = " ".join(line.strip() for line in GRAD_CAP_SVG.splitlines())  # one line for markdown
 SUGGESTIONS = ["Explain PEAS with an example", "What are the types of agents?",
                "Difference between BFS and DFS", "What is knowledge representation?"]
 
@@ -195,7 +236,7 @@ def maths(text: str) -> str:
 
 def render_sources(hits):
     pages = sorted({c.page for c, _ in hits})
-    with st.expander(f"📖 Sources — page {', '.join(map(str, pages))}"):
+    with st.expander(icon=":material/menu_book:", label=f"Sources — page {', '.join(map(str, pages))}"):
         for c, score in hits:
             st.markdown(f":violet-badge[p. {c.page}] **{c.source}** · match {score:.0%}")
             st.caption(plain(c.text[:350]) + ("..." if len(c.text) > 350 else ""))
@@ -214,7 +255,7 @@ def ask(question: str):
 # ---------- sidebar ----------
 
 with st.sidebar:
-    st.markdown("### 📚 Exam Prep AI")
+    st.markdown("### :material/school: Exam Prep AI")
     st.caption("Your notes → answers, quizzes and exam priorities.")
 
     # PDFs already in the project folder are loaded automatically
@@ -227,22 +268,22 @@ with st.sidebar:
     st.markdown("**Loaded**")
     for name, info in st.session_state.files.items():
         with st.container(border=True):
-            st.markdown(f"📄 **{name}**")
+            st.markdown(f":material/description: **{name}**")
             st.caption(f"{info['pages']} pages · {info['chunks']} searchable chunks")
 
     st.divider()
     show_sources = st.toggle("Show sources under answers", value=True)
-    if st.button("🧹 Clear chat", width="stretch", disabled=not st.session_state.messages):
+    if st.button("Clear chat", icon=":material/delete_sweep:", width="stretch", disabled=not st.session_state.messages):
         st.session_state.messages = []
         st.rerun()
 
-    with st.expander("👤 Profile"):
+    with st.expander("Profile", icon=":material/person:"):
         name = st.text_input("Your name", progress["name"])
         if name.strip() and name.strip() != progress["name"]:
             progress["name"] = name.strip()
             prog.save(progress)
 
-    with st.expander("⚙️ How it works"):
+    with st.expander("How it works", icon=":material/settings:"):
         st.markdown(
             "1. **OCR** — Gemini vision reads handwritten pages\n"
             "2. **Chunking** — text split into overlapping pieces\n"
@@ -270,11 +311,11 @@ total_pages = sum(f["pages"] for f in st.session_state.files.values())
 with st.container(border=True):
     c1, c2, c3 = st.columns([1.3, 2, 1.2], vertical_alignment="center")
     c1.markdown(f"<div class='topbar-title'>{page.split(' ', 1)[1]}</div>", unsafe_allow_html=True)
-    c2.text_input("Search", key="top_search", placeholder="🔍  Search your notes...",
+    c2.text_input("Search", key="top_search", placeholder="Search your notes...",
                   label_visibility="collapsed", on_change=search_notes)
     initial = html.escape(progress["name"][:1].upper() or "S")
     c3.markdown(
-        f"<div style='text-align:right'><span class='chip'>📄 {total_pages} pages</span> "
+        f"<div style='text-align:right'><span class='chip'>{mi('description')} {total_pages} pages</span> "
         f"<span class='chip'><span class='avatar'>{initial}</span>"
         f"<span><b>{html.escape(progress['name'])}</b><br><small>AI course</small></span></span></div>",
         unsafe_allow_html=True)
@@ -282,7 +323,7 @@ with st.container(border=True):
 st.write("")
 
 
-# ---------- 🏠 Overview: dashboard ----------
+# ---------- Overview: dashboard ----------
 
 def ask_from_dashboard():
     text = st.session_state.dash_ask.strip()
@@ -303,7 +344,7 @@ if page == HOME:
 
     # ----- left: study schedule (the "calendar") -----
     with left, st.container(border=True):
-        st.markdown("#### 📅 Study schedule")
+        st.markdown("#### :material/calendar_month: Study schedule")
         today = date.today()
         exam = date.fromisoformat(progress["exam_date"]) if progress["exam_date"] else None
         st.date_input("Exam date", value=exam, min_value=today + timedelta(days=1),
@@ -311,13 +352,13 @@ if page == HOME:
         if not plan_rows:
             st.caption("Build a study plan from your syllabus + PYQs and your days will be "
                        "planned here, most important units first.")
-            st.button("🗺️ Build study plan", width="stretch", type="primary",
+            st.button("Build study plan", icon=":material/map:", width="stretch", type="primary",
                       on_click=go, args=(PLAN,))
         elif not exam or exam <= today:
             st.caption("Set your exam date to spread your units over the days left.")
         else:
             sched = prog.schedule(plan_rows, exam, today)
-            st.markdown(f"<span class='chip'>⏳ {(exam - today).days} days to exam</span>",
+            st.markdown(f"<span class='chip'>{mi('hourglass_top')} {(exam - today).days} days to exam</span>",
                         unsafe_allow_html=True)
             days = sorted(sched)[:6]
             labels = {d: d.strftime("%a %d") for d in days}
@@ -325,13 +366,13 @@ if page == HOME:
                                           key="sched_day", label_visibility="collapsed")
             for unit in sched.get(picked or days[0], []):
                 if unit.get("revision"):
-                    st.markdown("<div class='slot'>🔁 <b>Revision + PYQ practice</b><br>"
+                    st.markdown(f"<div class='slot'>{mi('replay')} <b>Revision + PYQ practice</b><br>"
                                 "<small>Go through every High-priority unit again</small></div>",
                                 unsafe_allow_html=True)
                     continue
                 done = unit["title"] in progress["units_done"]
                 st.markdown(
-                    f"<div class='slot'>{'✅' if done else PRIORITY_ICON[unit['priority']][:1]} "
+                    f"<div class='slot'>{mi('check_circle', 'done') if done else dot(unit['priority'])} "
                     f"<b>Unit {unit['unit']}: {html.escape(unit['title'])}</b><br>"
                     f"<small>{unit['weightage']:.0%} weightage · {unit['priority']} priority</small>"
                     f"</div>", unsafe_allow_html=True)
@@ -372,13 +413,13 @@ if page == HOME:
             recent = progress["quizzes"][::-1][:3]
             if not recent:
                 st.caption("No quizzes yet — test yourself on any topic.")
-                st.button("📝 Start a quiz", width="stretch", on_click=go, args=(QUIZ,))
+                st.button("Start a quiz", icon=":material/quiz:", width="stretch", on_click=go, args=(QUIZ,))
             for i, q in enumerate(recent):
                 score = q["score"] / q["total"] if q["total"] else 0
                 with st.container(border=True):
                     st.markdown(
                         f"<div class='lesson-title'>{html.escape(q['topic'])}</div>"
-                        f"<div class='stat-sub'>{'🏆 Perfect!' if score == 1 else '👍 Good going' if score >= .6 else '📖 You can do better!'}"
+                        f"<div class='stat-sub'>{'Perfect!' if score == 1 else 'Good going' if score >= .6 else 'You can do better!'}"
                         f" · {q['score']}/{q['total']}</div>"
                         f"<div class='bar'><div style='width:{score:.0%}'></div></div>",
                         unsafe_allow_html=True)
@@ -396,7 +437,7 @@ if page == HOME:
                        f"<div class='stat-sub' style='font-size:.95rem'>Ready to make progress today?"
                        + (f"<br>Next up: <b>{html.escape(next_up['title'])}</b>" if next_up else "")
                        + "</div>", unsafe_allow_html=True)
-            b.markdown("<div class='hello-emoji'>🧑‍🎓</div>", unsafe_allow_html=True)
+            b.markdown(GRAD_CAP_SVG, unsafe_allow_html=True)
 
         with st.container(border=True):
             st.markdown("#### AI Assistant")
@@ -405,18 +446,18 @@ if page == HOME:
                      label_visibility="collapsed",
                      on_change=lambda: (go(ASK, pending_question=st.session_state.dash_tip),
                                         st.session_state.update(dash_tip=None)))
-            st.text_input("Ask", key="dash_ask", placeholder="🎙️  Ask me about your notes...",
+            st.text_input("Ask", key="dash_ask", placeholder="Ask me about your notes...",
                           label_visibility="collapsed", on_change=ask_from_dashboard)
             st.caption(f"Answers only from your {len(st.session_state.files)} file(s) · "
                        f"{len(kb.chunks)} chunks, with page numbers.")
 
 
-# ---------- 💬 Ask: chat with your notes ----------
+# ---------- Ask: chat with your notes ----------
 
 if page == ASK:
     if not st.session_state.messages:
         with st.container(border=True):
-            st.markdown("#### 👋 Ask anything from your notes")
+            st.markdown("#### :material/forum: Ask anything from your notes")
             st.caption("Answers are written only from your PDFs and every claim shows its page. "
                        "If it's not in your notes, the assistant will say so.")
             st.pills("Try one:", SUGGESTIONS, key="suggestion",
@@ -424,7 +465,7 @@ if page == ASK:
                                         st.session_state.update(suggestion=None)))
 
     for msg in st.session_state.messages:
-        with st.chat_message(msg["role"], avatar="🧑‍🎓" if msg["role"] == "user" else "📚"):
+        with st.chat_message(msg["role"], avatar=USER_AVATAR if msg["role"] == "user" else BOT_AVATAR):
             st.markdown(msg["content"])
             if msg.get("hits") and show_sources:
                 render_sources(msg["hits"])
@@ -433,9 +474,9 @@ if page == ASK:
     question = typed or st.session_state.pop("pending_question", None)
     if question:
         st.session_state.messages.append({"role": "user", "content": question})
-        with st.chat_message("user", avatar="🧑‍🎓"):
+        with st.chat_message("user", avatar=USER_AVATAR):
             st.markdown(question)
-        with st.chat_message("assistant", avatar="📚"):
+        with st.chat_message("assistant", avatar=BOT_AVATAR):
             with st.spinner("Searching your notes and writing an answer..."):
                 try:
                     reply, hits = answer(question, kb)
@@ -443,21 +484,21 @@ if page == ASK:
                     progress["asked"] += 1
                     prog.save(progress)
                 except Exception as e:
-                    reply, hits = f"⚠️ Something went wrong: {e}", []
+                    reply, hits = f"Something went wrong: {e}", []
             st.markdown(reply)
             if hits and show_sources:
                 render_sources(hits)
         st.session_state.messages.append({"role": "assistant", "content": reply, "hits": hits})
 
 
-# ---------- 📝 Quiz: MCQs generated from your notes ----------
+# ---------- Quiz: MCQs generated from your notes ----------
 
 def new_quiz(topic: str, n: int, level: str):
     with st.spinner(f"Writing and fact-checking {n} questions on '{topic}'..."):
         try:
             st.session_state.quiz = make_quiz(topic, kb, n, level)
         except Exception as e:
-            st.error(f"⚠️ Couldn't make a quiz: {e}")
+            st.error(f"Couldn't make a quiz: {e}", icon=":material/error:")
             return
     st.session_state.quiz_topic = topic
     st.session_state.quiz_settings = (topic, n, level)
@@ -468,7 +509,7 @@ def new_quiz(topic: str, n: int, level: str):
 
 if page == QUIZ:
     with st.container(border=True):
-        st.markdown("#### 📝 Practice quiz")
+        st.markdown("#### :material/quiz: Practice quiz")
         st.caption("MCQs written from your notes, then double-checked against them by a second AI pass.")
         with st.form("quiz_settings_form", border=False):
             topic = st.text_input("Topic", key="quiz_topic_input",
@@ -477,7 +518,7 @@ if page == QUIZ:
             n = c1.slider("Questions", 3, 10, 5)
             level = c2.segmented_control("Difficulty", ["easy", "medium", "hard"],
                                          default="medium") or "medium"
-            make = st.form_submit_button("✨ Generate quiz", type="primary", width="stretch")
+            make = st.form_submit_button("Generate quiz", icon=":material/auto_awesome:", type="primary", width="stretch")
 
     auto_topic = st.session_state.pop("auto_quiz_topic", None)  # from "Quiz me" on Topics
     if make and not topic.strip():
@@ -499,8 +540,8 @@ if page == QUIZ:
             with st.container(border=True):
                 c1, c2 = st.columns([1, 2], vertical_alignment="center")
                 c1.metric("Your score", f"{score} / {len(quiz)}")
-                c2.progress(pct, text=("🏆 Perfect!" if pct == 1 else "👍 Good job!"
-                                       if pct >= 0.6 else "📖 Keep revising!") + f"  {pct:.0%}")
+                c2.progress(pct, text=("Perfect!" if pct == 1 else "Good job!"
+                                       if pct >= 0.6 else "Keep revising!") + f"  {pct:.0%}")
                 wrong_pages = sorted({q["page"] for a, q in zip(answers, quiz)
                                       if a != q["answer_index"]})
                 if wrong_pages:
@@ -521,12 +562,12 @@ if page == QUIZ:
                     if checked:
                         right = maths(q["options"][q["answer_index"]])
                         if answers[i] == q["answer_index"]:
-                            st.success(f"Correct! {q['explanation']}", icon="✅")
+                            st.success(f"Correct! {q['explanation']}", icon=":material/check_circle:")
                         elif answers[i] is None:
-                            st.warning(f"Skipped. Answer: **{right}**. {q['explanation']}", icon="⏭️")
+                            st.warning(f"Skipped. Answer: **{right}**. {q['explanation']}", icon=":material/skip_next:")
                         else:
-                            st.error(f"Answer: **{right}**. {q['explanation']}", icon="❌")
-                        st.caption(f"📖 {q['source']}, page {q['page']}")
+                            st.error(f"Answer: **{right}**. {q['explanation']}", icon=":material/cancel:")
+                        st.caption(f":material/menu_book: {q['source']}, page {q['page']}")
             submitted = st.form_submit_button("Check answers", type="primary",
                                               disabled=checked, width="stretch")
 
@@ -539,21 +580,21 @@ if page == QUIZ:
 
         if checked:
             c1, c2 = st.columns(2)
-            if c1.button("🔁 Retry same questions", width="stretch"):
+            if c1.button("Retry same questions", icon=":material/replay:", width="stretch"):
                 st.session_state.quiz_checked = False
                 st.session_state.quiz_picks = []
                 st.session_state.quiz_round += 1
                 st.rerun()
-            if c2.button("✨ New quiz on this topic", width="stretch"):
+            if c2.button("New quiz on this topic", icon=":material/auto_awesome:", width="stretch"):
                 new_quiz(*st.session_state.quiz_settings)
                 st.rerun()
 
 
-# ---------- 🎯 Important topics: most-asked exam questions ----------
+# ---------- Important topics: most-asked exam questions ----------
 
 if page == TOPICS:
     with st.container(border=True):
-        st.markdown("#### 🎯 What should I study first?")
+        st.markdown("#### :material/insights: What should I study first?")
         st.caption("Finds every exam question in your notes and past papers, groups similar ones "
                    "with clustering, and ranks topics by how often they're asked + their marks. "
                    "Add past papers in the sidebar for better results.")
@@ -563,7 +604,7 @@ if page == TOPICS:
             format_func=lambda v: {0.2: "Very fine", 0.25: "Fine", 0.3: "Balanced",
                                    0.35: "Broad", 0.4: "Very broad"}[v],
             help="How similar questions must be to count as the same topic.")
-        analyze = c2.button("🔍 Analyze", type="primary", width="stretch")
+        analyze = c2.button("Analyze", icon=":material/search:", type="primary", width="stretch")
 
     if analyze:
         try:
@@ -575,7 +616,7 @@ if page == TOPICS:
                 st.session_state.topics = find_topics(questions, kb.embedder, grouping)
                 st.session_state.topic_count = len(questions)
         except Exception as e:
-            st.error(f"⚠️ Analysis failed: {e}")
+            st.error(f"Analysis failed: {e}", icon=":material/error:")
 
     topics = st.session_state.get("topics")
     if topics == []:
@@ -587,7 +628,7 @@ if page == TOPICS:
         m2.metric("Topics", len(topics))
         m3.metric("Marks covered", sum(t["total_marks"] for t in topics))
         st.success(f"Start with **{topics[0]['topic']}** — asked {topics[0]['times_asked']}× "
-                   f"for {topics[0]['total_marks']} marks.", icon="🥇")
+                   f"for {topics[0]['total_marks']} marks.", icon=":material/emoji_events:")
 
         df = pd.DataFrame([{"Topic": t["topic"], "Times asked": t["times_asked"],
                             "Total marks": t["total_marks"], "Importance": t["score"]}
@@ -607,9 +648,9 @@ if page == TOPICS:
                     f" :orange-badge[{t['total_marks']} marks]" if t["total_marks"] else "")
                 c1.markdown(f"**{rank}. {t['topic']}**  \n{badges}")
                 b1, b2 = c2.columns(2)
-                b1.button("📝 Quiz", key=f"tq{rank}", width="stretch", help="Quiz me on this",
+                b1.button("Quiz", icon=":material/quiz:", key=f"tq{rank}", width="stretch", help="Quiz me on this",
                           on_click=go, args=(QUIZ,), kwargs={"auto_quiz_topic": t["topic"]})
-                b2.button("💬 Explain", key=f"te{rank}", width="stretch",
+                b2.button("Explain", icon=":material/forum:", key=f"te{rank}", width="stretch",
                           help="Explain this from my notes", on_click=go, args=(ASK,),
                           kwargs={"pending_question": f"Explain {t['topic']} for my exam"})
                 with st.expander(f"{len(t['questions'])} question(s)", expanded=rank == 1):
@@ -619,7 +660,7 @@ if page == TOPICS:
                                     f":gray-badge[{q['source']} · p. {q['page']}]")
 
 
-# ---------- 🗺️ Study plan: syllabus + PYQs -> which chapter first, with weightage ----------
+# ---------- Study plan: syllabus + PYQs -> which chapter first, with weightage ----------
 
 if page == PLAN:
     st.session_state.setdefault("plan_syllabus", None)  # (file name, pdf bytes)
@@ -632,13 +673,13 @@ if page == PLAN:
         st.session_state.plan_pyqs.setdefault(pdf.name, pdf.read_bytes())
 
     with st.container(border=True):
-        st.markdown("#### 🗺️ Which chapter should I start with?")
+        st.markdown("#### :material/map: Which chapter should I start with?")
         st.caption("Upload your course handout/syllabus and previous year papers (PYQs). "
                    "Each PYQ question is matched to a syllabus unit to work out its weightage. "
                    "Scanned papers work too.")
         c1, c2 = st.columns(2)
-        syl = c1.file_uploader("1️⃣ Course handout / syllabus", type="pdf", key="syl_up")
-        pyqs = c2.file_uploader("2️⃣ Previous year papers (PYQs)", type="pdf",
+        syl = c1.file_uploader("Course handout / syllabus", type="pdf", key="syl_up")
+        pyqs = c2.file_uploader("Previous year papers (PYQs)", type="pdf",
                                 accept_multiple_files=True, key="pyq_up")
         if syl:
             st.session_state.plan_syllabus = (syl.name, syl.getvalue())
@@ -648,18 +689,18 @@ if page == PLAN:
         if st.session_state.plan_syllabus or st.session_state.plan_pyqs:
             chips = []
             if st.session_state.plan_syllabus:
-                chips.append(f":violet-badge[📘 {st.session_state.plan_syllabus[0]}]")
-            chips += [f":blue-badge[📄 {n}]" for n in st.session_state.plan_pyqs]
+                chips.append(f":violet-badge[:material/menu_book: {st.session_state.plan_syllabus[0]}]")
+            chips += [f":blue-badge[:material/description: {n}]" for n in st.session_state.plan_pyqs]
             st.markdown(" ".join(chips))
             if st.button("Clear files", key="plan_clear"):
                 st.session_state.plan_syllabus, st.session_state.plan_pyqs = None, {}
                 st.session_state.pop("plan", None)
                 st.rerun()
 
-        build = st.button("📊 Build my study plan", type="primary", width="stretch",
+        build = st.button("Build my study plan", icon=":material/analytics:", type="primary", width="stretch",
                           disabled=st.session_state.plan_syllabus is None)
         if st.session_state.plan_syllabus is None:
-            st.caption("⬆️ Add a syllabus first. PYQs are optional but give real weightage.")
+            st.caption("Add a syllabus first. PYQs are optional but give real weightage.")
 
     if build:
         try:
@@ -678,7 +719,7 @@ if page == PLAN:
                                 for r in st.session_state.plan["rows"]]
             prog.save(progress)
         except Exception as e:
-            st.error(f"⚠️ Couldn't build the plan: {e}")
+            st.error(f"Couldn't build the plan: {e}", icon=":material/error:")
 
     plan = st.session_state.get("plan")
     if plan and not plan["rows"]:
@@ -686,7 +727,7 @@ if page == PLAN:
     elif plan:
         rows = plan["rows"]
         if plan["course"]:
-            st.markdown(f"##### 📘 {plan['course']}")
+            st.markdown(f"##### :material/menu_book: {plan['course']}")
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Units", len(rows))
         m2.metric("PYQ papers", plan["papers"])
@@ -697,20 +738,20 @@ if page == PLAN:
         if plan["basis"] == "pyq":
             st.success(f"Start with **Unit {top['unit']}: {top['title']}** — "
                        f"{top['weightage']:.0%} of the PYQ "
-                       f"{'marks' if plan['use_marks'] else 'questions'}.", icon="🥇")
+                       f"{'marks' if plan['use_marks'] else 'questions'}.", icon=":material/emoji_events:")
         elif plan["basis"] == "hours":
             st.info("No PYQs added, so units are ranked by **lecture hours**. "
-                    "Add previous year papers for real exam weightage.", icon="ℹ️")
+                    "Add previous year papers for real exam weightage.", icon=":material/info:")
         else:
             st.info("No PYQs or lecture hours found, so units are in **syllabus order**. "
-                    "Add previous year papers for real exam weightage.", icon="ℹ️")
+                    "Add previous year papers for real exam weightage.", icon=":material/info:")
 
         weight_label = ("PYQ weightage" if plan["basis"] == "pyq" else
                         "Lecture-hour share" if plan["basis"] == "hours" else "Weightage")
         table = pd.DataFrame([{
             "#": r["order"],
             "Unit": f"{r['unit']}. {r['title']}",
-            "Priority": PRIORITY_ICON[r["priority"]],
+            "Priority": r["priority"],
             weight_label: r["weightage"] * 100,
             "PYQ marks": r["marks"],
             "Asked in": f"{r['asked_in']}/{plan['papers']}" if plan["papers"] else "—",
@@ -720,8 +761,11 @@ if page == PLAN:
             table = table.drop(columns="Hours")
         else:
             table = table.drop(columns=["PYQ marks", "Asked in"])
+        # colour the Priority cell instead of using emoji dots
+        styled = table.style.map(lambda p: f"color: {PRIORITY_COLOR[p]}; font-weight: 600;",
+                                 subset=["Priority"])
         st.dataframe(
-            table, hide_index=True, width="stretch", height=35 * (len(table) + 1) + 3,
+            styled, hide_index=True, width="stretch", height=35 * (len(table) + 1) + 3,
             column_config={
                 "#": st.column_config.NumberColumn(width=40),
                 "Unit": st.column_config.TextColumn(width="medium"),
@@ -735,8 +779,8 @@ if page == PLAN:
             },
         )
         csv = table.assign(Why=[r["why"] for r in rows], Topics=[", ".join(r["topics"]) for r in rows])
-        st.download_button("⬇️ Download table (CSV)", csv.to_csv(index=False).encode("utf-8-sig"),
-                           "study_plan.csv", "text/csv")
+        st.download_button("Download table (CSV)", csv.to_csv(index=False).encode("utf-8-sig"),
+                           "study_plan.csv", "text/csv", icon=":material/download:")
 
         if plan["basis"] == "pyq":
             chart = alt.Chart(table).mark_arc(innerRadius=60).encode(
@@ -751,11 +795,11 @@ if page == PLAN:
             with st.container(border=True):
                 c1, c2 = st.columns([4, 2], vertical_alignment="center")
                 c1.markdown(f"**#{r['order']} · Unit {r['unit']}: {r['title']}**  \n"
-                            f"{PRIORITY_ICON[r['priority']]} · {r['why']}")
+                            f"{PRIORITY_BADGE[r['priority']]} · {r['why']}")
                 b1, b2 = c2.columns(2)
-                b1.button("📝 Quiz", key=f"pq{r['unit']}", width="stretch",
+                b1.button("Quiz", icon=":material/quiz:", key=f"pq{r['unit']}", width="stretch",
                           on_click=go, args=(QUIZ,), kwargs={"auto_quiz_topic": r["title"]})
-                b2.button("💬 Explain", key=f"pe{r['unit']}", width="stretch", on_click=go,
+                b2.button("Explain", icon=":material/forum:", key=f"pe{r['unit']}", width="stretch", on_click=go,
                           args=(ASK,),
                           kwargs={"pending_question": f"Summarise {r['title']} for my exam"})
                 done = st.checkbox("Mark as done", value=r["title"] in progress["units_done"],
@@ -773,6 +817,6 @@ if page == PLAN:
                         st.markdown(f"- {plain(q['question'])}{marks} :gray-badge[{q['paper']}]")
 
         if plan["unmapped"]:
-            with st.expander(f"⚠️ {len(plan['unmapped'])} question(s) didn't match any unit"):
+            with st.expander(f"{len(plan['unmapped'])} question(s) didn't match any unit", icon=":material/warning:"):
                 for q in plan["unmapped"]:
                     st.markdown(f"- {plain(q['question'])} :gray-badge[{q['paper']}]")
