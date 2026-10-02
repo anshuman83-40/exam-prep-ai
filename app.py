@@ -3,7 +3,7 @@
 import html
 import os
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import altair as alt
 import pandas as pd
@@ -13,7 +13,8 @@ from sentence_transformers import CrossEncoder, SentenceTransformer
 
 import progress as prog
 from rag import (EMBED_MODEL, PROJECT_DIR, RERANK_MODEL, KnowledgeBase, answer, extract_questions,
-                 extract_syllabus, find_topics, make_chunks, make_quiz, read_pages, study_plan)
+                 extract_syllabus, find_topics, grade_exam, make_chunks, make_flashcards,
+                 make_mock_exam, make_quiz, read_pages, study_plan, transcribe_answer)
 
 load_dotenv(PROJECT_DIR / ".env")
 st.set_page_config(page_title="AI Exam Prep Assistant", page_icon=":material/school:", layout="wide")
@@ -111,6 +112,12 @@ div[data-testid="stChatInput"] textarea { min-height: 0 !important; }
 .mi.done { color: #4ade80; }
 .dot { display:inline-block; width:.6rem; height:.6rem; border-radius:50%; margin-right:.2rem;
        box-shadow: 0 0 8px currentColor; vertical-align: .05em; }
+.flash { min-height: 120px; display: grid; place-items: center; text-align: center;
+         padding: 1.4rem 1rem; margin: .4rem 0 .8rem; border-radius: 18px; font-size: 1.25rem;
+         font-weight: 600; background: linear-gradient(145deg, rgba(139,92,246,.28), rgba(76,29,149,.18));
+         border: 1px solid rgba(167,139,250,.35); white-space: pre-wrap; }
+.flash.back { font-size: 1.05rem; font-weight: 500; background: rgba(255,255,255,.06);
+              border-color: rgba(255,255,255,.12); }
 .hello-art { text-align: right; }
 .hello-art svg { filter: drop-shadow(0 0 18px rgba(139,92,246,.6)); }
 
@@ -136,7 +143,13 @@ if not os.getenv("GEMINI_API_KEY"):
 
 HOME, ASK, QUIZ, TOPICS, PLAN = (":material/dashboard: Overview", ":material/forum: Ask", ":material/quiz: Quiz",
                                    ":material/insights: Topics", ":material/map: Study plan")
-PAGES = [HOME, ASK, QUIZ, TOPICS, PLAN]
+EXAM, CARDS = ":material/assignment: Mock exam", ":material/style: Flashcards"
+PAGES = [HOME, ASK, QUIZ, EXAM, CARDS, TOPICS, PLAN]
+EXAM_PRESETS = {  # name -> ([(questions, marks each), ...], minutes)
+    "Quick test · 20 marks": ([(5, 2), (2, 5)], 30),
+    "Mid-sem · 30 marks": ([(5, 2), (2, 10)], 60),
+    "End-sem · 50 marks": ([(5, 2), (4, 10)], 120),
+}
 PRIORITY_BADGE = {"High": ":red-badge[High]", "Medium": ":orange-badge[Medium]",
                   "Low": ":green-badge[Low]"}
 PRIORITY_COLOR = {"High": "#f87171", "Medium": "#fbbf24", "Low": "#4ade80"}
@@ -383,6 +396,21 @@ if page == HOME:
                 b2.button("Quiz", key=f"q_{picked}_{unit['unit']}", width="stretch",
                           on_click=go, args=(QUIZ,), kwargs={"auto_quiz_topic": unit["title"]})
 
+    # ----- left, below the schedule: flashcards due + last mock exam -----
+    with left, st.container(border=True):
+        n_due = len(prog.due_cards(progress))
+        last_mock = progress["mocks"][-1] if progress["mocks"] else None
+        mock_text = f"{last_mock['scored']:g}/{last_mock['total']}" if last_mock else "—"
+        a, b = st.columns(2)
+        a.markdown(f"<div class='stat-big'>{n_due}</div><div class='stat-sub'>Flashcards due</div>",
+                   unsafe_allow_html=True)
+        b.markdown(f"<div class='stat-big'>{mock_text}</div>"
+                   f"<div class='stat-sub'>Last mock exam</div>", unsafe_allow_html=True)
+        a.button("Review", icon=":material/style:", width="stretch", on_click=go, args=(CARDS,),
+                 key="dash_cards")
+        b.button("Take a mock", icon=":material/assignment:", width="stretch", on_click=go,
+                 args=(EXAM,), key="dash_mock")
+
     # ----- middle: stats, progress ring, recent quizzes -----
     with mid:
         acc = prog.accuracy(progress)
@@ -588,6 +616,238 @@ if page == QUIZ:
             if c2.button("New quiz on this topic", icon=":material/auto_awesome:", width="stretch"):
                 new_quiz(*st.session_state.quiz_settings)
                 st.rerun()
+
+
+# ---------- Mock exam: a full paper in exam pattern, written answers graded by AI ----------
+
+@st.fragment(run_every="1s")
+def exam_timer(ends_at: datetime):
+    left = int((ends_at - datetime.now()).total_seconds())
+    if left <= 0:
+        st.error("Time's up! Submit your answers now.", icon=":material/timer_off:")
+        return
+    h, rest = divmod(left, 3600)
+    st.markdown(f"<span class='chip'>{mi('timer')} {h}:{rest // 60:02d}:{rest % 60:02d} left</span>",
+                unsafe_allow_html=True)
+
+
+def grade_band(pct: float) -> str:
+    return ("Outstanding" if pct >= .9 else "Very good" if pct >= .75 else "Good" if pct >= .6
+            else "Pass" if pct >= .4 else "Needs work")
+
+
+if page == EXAM:
+    exam = st.session_state.get("exam")
+
+    if exam is None:  # ----- set up a paper -----
+        with st.container(border=True):
+            st.markdown("#### :material/assignment: Mock exam")
+            st.caption("A full paper in university pattern, written from your notes. Type your "
+                       "answers or upload photos of handwritten ones; the AI marks each answer "
+                       "against the key points like an examiner.")
+            preset = st.segmented_control("Paper", [*EXAM_PRESETS, "Custom"],
+                                          default="Quick test · 20 marks") or "Quick test · 20 marks"
+            if preset == "Custom":
+                c1, c2, c3, c4, c5 = st.columns(5)
+                n_short = c1.number_input("Short Qs", 0, 10, 5)
+                m_short = c2.number_input("Marks each", 1, 5, 2)
+                n_long = c3.number_input("Long Qs", 0, 8, 2)
+                m_long = c4.number_input("Marks each ", 4, 20, 10)
+                minutes = c5.number_input("Minutes", 10, 180, 45, step=5)
+                pattern = [(n, m) for n, m in [(n_short, m_short), (n_long, m_long)] if n]
+            else:
+                pattern, minutes = EXAM_PRESETS[preset]
+            total = sum(n * m for n, m in pattern)
+            st.caption(" + ".join(f"{n} × {m} marks" for n, m in pattern)
+                       + f" = **{total} marks** · {minutes} minutes")
+            use_plan = bool(progress["plan"]) and st.toggle(
+                "Weight questions by my study plan",
+                help="Only if your study plan is for the same subject as these notes.")
+            if st.button("Generate paper", icon=":material/auto_awesome:", type="primary",
+                         width="stretch", disabled=not pattern):
+                with st.spinner("Setting your paper from your notes..."):
+                    try:
+                        paper = make_mock_exam(kb, pattern, progress["plan"] if use_plan else None)
+                    except Exception as e:
+                        st.error(f"Couldn't make the paper: {e}", icon=":material/error:")
+                        paper = None
+                if paper and paper["questions"]:
+                    st.session_state.exam = {**paper, "id": datetime.now().strftime("%H%M%S"),
+                                             "ends_at": datetime.now() + timedelta(minutes=minutes),
+                                             "results": None, "answers": []}
+                    st.rerun()
+                elif paper is not None:
+                    st.warning("Not enough notes to set a paper. Add notes in the sidebar.")
+
+    elif exam["results"] is None:  # ----- writing the paper -----
+        qs = exam["questions"]
+        total = sum(q["marks"] for q in qs)
+        with st.container(border=True):
+            c1, c2, c3 = st.columns([2, 1.2, 1], vertical_alignment="center")
+            c1.markdown(f"#### Mock paper · {total} marks")
+            with c2:
+                exam_timer(exam["ends_at"])
+            if c3.button("Discard paper", icon=":material/close:", width="stretch"):
+                st.session_state.exam = None
+                st.rerun()
+            st.caption("Answer in your own words. For long answers, write points like you would "
+                       "in the exam. Blank answers score 0.")
+
+        with st.form("mock_answers", border=False):
+            for i, q in enumerate(qs, start=1):
+                with st.container(border=True):
+                    st.markdown(f":violet-badge[Q{i}] :orange-badge[{q['marks']} marks]  \n"
+                                f"**{maths(q['question'])}**")
+                    st.text_area("Your answer", key=f"ans{i}-{exam['id']}",
+                                 height=90 if q["marks"] <= 3 else 220,
+                                 label_visibility="collapsed", placeholder="Write your answer...")
+                    st.file_uploader("…or upload a photo of your handwritten answer",
+                                     type=["jpg", "jpeg", "png"], key=f"img{i}-{exam['id']}")
+            submit = st.form_submit_button("Submit for grading", icon=":material/grading:",
+                                           type="primary", width="stretch")
+        if submit:
+            answers = []
+            with st.spinner("Reading handwritten answers and marking your paper..."):
+                try:
+                    for i in range(1, len(qs) + 1):
+                        text = st.session_state.get(f"ans{i}-{exam['id']}") or ""
+                        img = st.session_state.get(f"img{i}-{exam['id']}")
+                        if img is not None:
+                            text = (text + "\n" + transcribe_answer(img.getvalue(), img.type)).strip()
+                        answers.append(text)
+                    exam["answers"] = answers
+                    exam["results"] = grade_exam(exam, answers)
+                    prog.record_mock(progress, sum(r["marks"] for r in exam["results"]), total, len(qs))
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Couldn't grade the paper: {e}", icon=":material/error:")
+
+    else:  # ----- results -----
+        qs, results = exam["questions"], exam["results"]
+        total = sum(q["marks"] for q in qs)
+        scored = sum(r["marks"] for r in results)
+        pct = scored / total if total else 0
+        with st.container(border=True):
+            c1, c2 = st.columns([1, 2], vertical_alignment="center")
+            c1.markdown(f"<div class='stat-big'>{scored:g} / {total}</div>"
+                        f"<div class='stat-sub'>Mock exam score</div>", unsafe_allow_html=True)
+            c2.progress(pct, text=f"{grade_band(pct)} · {pct:.0%}")
+            weak = sorted({q["page"] for q, r in zip(qs, results) if r["marks"] < q["marks"] * .6})
+            if weak:
+                c2.caption(f"Revise page(s) {', '.join(map(str, weak))} of your notes.")
+            b1, b2 = st.columns(2)
+            if b1.button("New paper", icon=":material/refresh:", width="stretch", type="primary"):
+                st.session_state.exam = None
+                st.rerun()
+            lost = [(q, r) for q, r in zip(qs, results) if r["marks"] < q["marks"]]
+            if b2.button(f"Make flashcards from {len(lost)} weak answer(s)", icon=":material/style:",
+                         width="stretch", disabled=not lost):
+                added = prog.add_cards(progress, [
+                    {"front": q["question"], "back": q["model_answer"], "topic": "Mock exam",
+                     "source": q["source"], "page": q["page"]} for q, _ in lost])
+                st.toast(f"Added {added} flashcard(s) to your deck.", icon=":material/style:")
+
+        for i, (q, r, a) in enumerate(zip(qs, results, exam["answers"]), start=1):
+            with st.container(border=True):
+                colour = "green" if r["marks"] == q["marks"] else "orange" if r["marks"] else "red"
+                st.markdown(f":violet-badge[Q{i}] :{colour}-badge[{r['marks']:g} / {q['marks']} marks]"
+                            f"  \n**{maths(q['question'])}**")
+                if a:
+                    with st.expander("Your answer"):
+                        st.markdown(plain(a))
+                for point in r["covered"]:
+                    st.markdown(f":green[:material/check_circle:] {plain(point)}")
+                for point in r["missed"]:
+                    st.markdown(f":red[:material/cancel:] {plain(point)}")
+                st.caption(r["feedback"])
+                with st.expander("Model answer", icon=":material/menu_book:"):
+                    st.markdown(maths(q["model_answer"]))
+                    st.caption(f"From {q['source']}, page {q['page']}")
+
+
+# ---------- Flashcards: spaced repetition ----------
+
+def rate_card(card_id: str, quality: int):
+    for card in progress["cards"]:
+        if card["id"] == card_id:
+            prog.review(card, quality)
+    prog.save(progress)
+    st.session_state.card_revealed = False
+
+
+if page == CARDS:
+    cards = progress["cards"]
+    due = sorted(prog.due_cards(progress), key=lambda c: c["due"])
+    learned = sum(c["reps"] >= 2 for c in cards)
+
+    with st.container(border=True):
+        a, b, c = st.columns(3)
+        for col, value, label in [(a, len(due), "Due today"), (b, len(cards), "Cards"),
+                                  (c, learned, "Learned")]:
+            col.markdown(f"<div style='text-align:center'><div class='stat-big'>{value}</div>"
+                         f"<div class='stat-sub'>{label}</div></div>", unsafe_allow_html=True)
+
+    left, right = st.columns([1.6, 1], gap="medium")
+    with left, st.container(border=True):
+        st.markdown("#### :material/style: Review")
+        if not cards:
+            st.caption("No cards yet. Make some from any topic on the right.")
+        elif not due:
+            next_due = min(c["due"] for c in cards)
+            st.success(f"All caught up! Next cards are due on {next_due}.",
+                       icon=":material/task_alt:")
+        else:
+            card = due[0]
+            st.caption(f"{len(due)} left today · {card['topic']} · {card['source']}, p. {card['page']}")
+            st.markdown(f"<div class='flash'>{html.escape(card['front'])}</div>",
+                        unsafe_allow_html=True)
+            if not st.session_state.get("card_revealed"):
+                st.button("Show answer", icon=":material/visibility:", type="primary",
+                          width="stretch", on_click=st.session_state.update,
+                          kwargs={"card_revealed": True})
+            else:
+                st.markdown(f"<div class='flash back'>{html.escape(card['back'])}</div>",
+                            unsafe_allow_html=True)
+                st.caption("How well did you remember it?")
+                cols = st.columns(4)
+                for col, (label, q) in zip(cols, [("Again", 1), ("Hard", 3), ("Good", 4), ("Easy", 5)]):
+                    days = prog.next_interval(card, q)
+                    col.button(f"{label} · {f'{days}d' if days else 'now'}", key=f"rate{q}",
+                               width="stretch",
+                               type="primary" if q == 4 else "secondary",
+                               on_click=rate_card, args=(card["id"], q))
+
+    with right, st.container(border=True):
+        st.markdown("#### :material/auto_awesome: Make cards")
+        with st.form("make_cards", border=False):
+            topic = st.text_input("Topic", placeholder="e.g. types of agents, A* search",
+                                  key="card_topic")
+            n = st.slider("How many", 5, 20, 10)
+            make = st.form_submit_button("Make flashcards", type="primary", width="stretch")
+        if make and topic.strip():
+            with st.spinner(f"Writing {n} cards on '{topic}' from your notes..."):
+                try:
+                    added = prog.add_cards(progress, make_flashcards(topic.strip(), kb, n))
+                    st.toast(f"Added {added} new card(s).", icon=":material/style:")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Couldn't make cards: {e}", icon=":material/error:")
+        elif make:
+            st.warning("Type a topic first.")
+
+        if cards:
+            with st.expander(f"Your deck ({len(cards)})", icon=":material/folder:"):
+                by_topic: dict[str, list] = {}
+                for c in cards:
+                    by_topic.setdefault(c["topic"], []).append(c)
+                for t, group in by_topic.items():
+                    x, y = st.columns([3, 1], vertical_alignment="center")
+                    x.markdown(f"**{plain(t)}** · {len(group)} cards")
+                    if y.button("Delete", key=f"del-{t}", icon=":material/delete:",
+                                type="tertiary"):
+                        progress["cards"] = [c for c in cards if c["topic"] != t]
+                        prog.save(progress)
+                        st.rerun()
 
 
 # ---------- Important topics: most-asked exam questions ----------

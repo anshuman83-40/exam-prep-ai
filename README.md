@@ -8,6 +8,12 @@ Turn your course notes — **even handwritten, photographed ones** — into a pe
 
 - 💬 **Ask** questions and get answers written *only* from your notes, with page numbers
 - 📝 **Quiz** yourself with MCQs generated from your notes and fact-checked by a second AI pass
+- 🧾 **Mock exam**: a full paper in university pattern (e.g. 5×2 + 2×10), with a live timer.
+  Type answers or upload photos of handwritten ones; the AI marks each answer against key points
+  like an examiner, lists what you covered/missed, shows a model answer, and can turn weak
+  answers into flashcards
+- 🃏 **Flashcards with spaced repetition** (SM-2, the algorithm behind Anki): cards made from
+  your notes come back just before you'd forget them — *Again / Hard / Good / Easy*
 - 🎯 **Important topics**: finds every exam question in your notes/past papers, groups similar
   ones and tells you what to study first
 - 🗺️ **Study plan**: upload your course handout/syllabus and previous year papers (PYQs) and get
@@ -113,6 +119,8 @@ files and add `GEMINI_API_KEY` as a secret.
 | 4 | `rag.py` → `make_quiz()` | Structured output (Pydantic schema), LLM-as-a-judge verification |
 | 5 | `rag.py` → `find_topics()` | Information extraction + Agglomerative Clustering |
 | 5+ | `rag.py` → `study_plan()` | Syllabus parsing, LLM classification, weightage analysis |
+| 5+ | `rag.py` → `make_mock_exam()`, `grade_exam()` | Rubric-based LLM grading, handwriting OCR of answers |
+| 5+ | `progress.py` → `review()` | SM-2 spaced repetition scheduling |
 | 6 | `levels/level6_evaluate.py` | Evaluation: synthetic test set, Hit@k, MRR, hallucination test |
 | 7 | this README | Deployment, documentation |
 

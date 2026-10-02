@@ -5,13 +5,14 @@ Stored as progress.json in the project folder (kept out of git).
 
 import json
 import math
+import uuid
 from datetime import date, datetime, timedelta
 
 from rag import PROJECT_DIR
 
 PROGRESS_FILE = PROJECT_DIR / "progress.json"
 DEFAULTS = {"name": "Anshuman", "exam_date": None, "quizzes": [], "asked": 0,
-            "units_done": [], "plan": []}
+            "units_done": [], "plan": [], "cards": [], "mocks": []}
 
 
 def load() -> dict:
@@ -30,6 +31,66 @@ def record_quiz(progress: dict, topic: str, score: int, total: int):
     progress["quizzes"].append({"topic": topic, "score": score, "total": total,
                                 "at": datetime.now().isoformat(timespec="minutes")})
     save(progress)
+
+
+def record_mock(progress: dict, scored: float, total: int, n_questions: int):
+    progress["mocks"].append({"scored": scored, "total": total, "questions": n_questions,
+                              "at": datetime.now().isoformat(timespec="minutes")})
+    save(progress)
+
+
+# ---------- flashcards: SM-2 spaced repetition (the algorithm behind Anki/SuperMemo) ----------
+
+def add_cards(progress: dict, cards: list[dict]) -> int:
+    """Add new cards (due today), skipping ones whose front already exists. Returns # added."""
+    seen = {c["front"].lower() for c in progress["cards"]}
+    added = 0
+    for card in cards:
+        if card["front"].lower() in seen:
+            continue
+        progress["cards"].append({**card, "id": uuid.uuid4().hex[:10], "ef": 2.5, "reps": 0,
+                                  "interval": 0, "due": date.today().isoformat()})
+        seen.add(card["front"].lower())
+        added += 1
+    save(progress)
+    return added
+
+
+def due_cards(progress: dict, today: date | None = None) -> list[dict]:
+    """Cards due today, oldest first; cards just failed ("Again") go to the back of the queue."""
+    today = (today or date.today()).isoformat()
+    due = [c for c in progress["cards"] if c["due"] <= today]
+    return sorted(due, key=lambda c: (c["due"], c.get("last", "")))
+
+
+FIRST_STEP = {3: 1, 4: 2, 5: 4}  # days after the first successful review: Hard / Good / Easy
+
+
+def review(card: dict, quality: int, today: date | None = None):
+    """Update a card after a review. quality: 0-5 (Again=1, Hard=3, Good=4, Easy=5).
+
+    SM-2 (with Anki-style first steps): a failed card is shown again in this session;
+    otherwise the gap grows first step (1/2/4 days) -> 6 days -> previous gap x ease factor.
+    The ease factor drops when a card feels hard and rises when it feels easy, so hard
+    cards come back more often."""
+    today = today or date.today()
+    if quality < 3:
+        card["reps"], card["interval"] = 0, 0  # due today again, after the other cards
+    else:
+        card["reps"] += 1
+        card["interval"] = (FIRST_STEP[min(quality, 5)] if card["reps"] == 1
+                            else 6 if card["reps"] == 2
+                            else round(card["interval"] * card["ef"]))
+    card["ef"] = max(1.3, card["ef"] + 0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02))
+    card["due"] = (today + timedelta(days=card["interval"])).isoformat()
+    card["last"] = datetime.now().isoformat(timespec="seconds")
+
+
+def next_interval(card: dict, quality: int) -> int:
+    """Days until the card returns if answered with this quality (shown on the buttons)."""
+    trial = dict(card)
+    review(trial, quality)
+    return trial["interval"]
 
 
 def points(progress: dict) -> int:
