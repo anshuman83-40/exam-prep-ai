@@ -1,0 +1,11 @@
+[server]
+# Don't scan library files for changes (transformers has thousands of modules -> slow + noisy logs)
+fileWatcherType = "none"
+headless = true
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+primaryColor = "#7c6cf2"
+baseRadius = "medium"

@@ -1,0 +1,19 @@
+# CPU-only PyTorch (much smaller download; servers here have no GPU)
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.1
+
+streamlit==1.64.0
+altair==6.3.0
+pandas==3.0.6
+google-genai==2.26.0
+pydantic==2.13.5
+python-dotenv==1.2.4
+pypdf==6.19.0
+pypdfium2==5.13.0
+pillow==12.3.0
+sentence-transformers==6.1.0
+transformers==5.18.0
+faiss-cpu==1.15.1
+rank-bm25==0.2.2
+scikit-learn==1.9.1
+numpy==2.5.3

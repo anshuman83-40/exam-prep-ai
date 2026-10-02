@@ -1,0 +1,240 @@
+[
+ {
+  "question": "How are different logical connectives like conjunction and implication represented?",
+  "pages": [
+   33
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "What is the time complexity formula for Breadth-First Search?",
+  "pages": [
+   7
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "What are the main categories of artificial intelligence and types of data?",
+  "pages": [
+   2
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "How do you translate natural language sentences involving quantifiers into predicate logic?",
+  "pages": [
+   39
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "How is heuristic search calculated using Euclidean distance and misplaced tiles?",
+  "pages": [
+   16
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "How does bidirectional search work compared to standard tree traversal?",
+  "pages": [
+   14
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "What is Iterative Deepening Depth-First Search and how does it combine BFS and DFS?",
+  "pages": [
+   13
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "How are stack and queue operations used in tree traversal algorithms?",
+  "pages": [
+   8
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "How does backtracking function during a depth-first search traversal?",
+  "pages": [
+   6
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "How do you solve cryptarithmetic puzzles using constraints and substitutions?",
+  "pages": [
+   28
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "What is the difference between informed and uninformed search strategies?",
+  "pages": [
+   6
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "How does alpha-beta pruning optimize game tree searches?",
+  "pages": [
+   31
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "How are heuristic values evaluated for state spaces in puzzle problems?",
+  "pages": [
+   24
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "What are the key components of an AI agent and its environment?",
+  "pages": [
+   3
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "How do you perform resolution refutation using First-Order Logic?",
+  "pages": [
+   41
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "What are the different types of propositional logic statements?",
+  "pages": [
+   34
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "How are heuristic values assigned to nodes in a search graph?",
+  "pages": [
+   12
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "How do you prove conclusions or contradictions using resolution trees?",
+  "pages": [
+   37
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "What constraints must be satisfied when solving cryptarithmetic problems?",
+  "pages": [
+   26
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "How do you derive logical conclusions from a given knowledge base?",
+  "pages": [
+   43
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "How does Best-First Search select the next node to expand using an open list?",
+  "pages": [
+   12
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "How do you calculate the total evaluation cost in A* search?",
+  "pages": [
+   20
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "How does A* search manage open and closed lists during pathfinding?",
+  "pages": [
+   19
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "What are the basic components of a Constraint Satisfaction Problem?",
+  "pages": [
+   25
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "What are the steps involved in performing resolution in predicate logic?",
+  "pages": [
+   40
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "How does the minimax algorithm use backtracking and utility values?",
+  "pages": [
+   29
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "How do you convert predicate logic statements into clause form for resolution?",
+  "pages": [
+   42
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "How do you determine if a propositional statement is a tautology, contradiction, or contingency?",
+  "pages": [
+   35
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "What is a major drawback of using greedy best-first search?",
+  "pages": [
+   17
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "How do you prove a goal statement using resolution refutation?",
+  "pages": [
+   36
+  ],
+  "type": "synthetic"
+ },
+ {
+  "question": "Explain PEAS with an example",
+  "pages": [
+   5
+  ],
+  "type": "manual"
+ },
+ {
+  "question": "What are the different types of agents?",
+  "pages": [
+   4
+  ],
+  "type": "manual"
+ },
+ {
+  "question": "difference between structured and unstructured data",
+  "pages": [
+   2
+  ],
+  "type": "manual"
+ },
+ {
+  "question": "which agent type is chatgpt an example of",
+  "pages": [
+   4
+  ],
+  "type": "manual"
+ }
+]
