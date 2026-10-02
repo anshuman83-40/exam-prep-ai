@@ -2,6 +2,10 @@
 
 Turn your course notes — **even handwritten, photographed ones** — into a personal exam tutor.
 
+- 🏠 **Overview dashboard** (dark glass UI, works on phone and laptop): study schedule up to
+  your exam date, quiz points & accuracy, units-completed ring, recent quizzes with *Continue*,
+  and an AI assistant box. Progress is saved locally in `progress.json`.
+
 - 💬 **Ask** questions and get answers written *only* from your notes, with page numbers
 - 📝 **Quiz** yourself with MCQs generated from your notes and fact-checked by a second AI pass
 - 🎯 **Important topics**: finds every exam question in your notes/past papers, groups similar

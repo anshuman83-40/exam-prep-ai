@@ -7,5 +7,9 @@ headless = true
 gatherUsageStats = false
 
 [theme]
-primaryColor = "#7c6cf2"
-baseRadius = "medium"
+base = "dark"
+primaryColor = "#8b5cf6"
+backgroundColor = "#0b0715"
+secondaryBackgroundColor = "#1a1030"
+textColor = "#ede9fe"
+baseRadius = "large"

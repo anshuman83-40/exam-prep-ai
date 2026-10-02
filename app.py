@@ -1,7 +1,9 @@
 """AI Exam Prep Assistant — chat with your notes. Run with: streamlit run app.py"""
 
+import html
 import os
 import re
+from datetime import date, timedelta
 
 import altair as alt
 import pandas as pd
@@ -9,18 +11,112 @@ import streamlit as st
 from dotenv import load_dotenv
 from sentence_transformers import CrossEncoder, SentenceTransformer
 
+import progress as prog
 from rag import (EMBED_MODEL, PROJECT_DIR, RERANK_MODEL, KnowledgeBase, answer, extract_questions,
                  extract_syllabus, find_topics, make_chunks, make_quiz, read_pages, study_plan)
 
 load_dotenv(PROJECT_DIR / ".env")
-st.set_page_config(page_title="AI Exam Prep Assistant", page_icon="📚", layout="centered")
+st.set_page_config(page_title="AI Exam Prep Assistant", page_icon="📚", layout="wide")
 
+# Dark purple "glass" theme. Streamlit's own colours are set in .streamlit/config.toml;
+# this adds the gradient background, glass cards, pill buttons and the dashboard widgets.
 st.markdown("""
 <style>
-  .block-container { padding-top: 2.2rem; }
-  .hero h1 { font-size: 2rem; margin: 0; padding: 0; }
-  .hero p  { opacity: .75; margin: .25rem 0 0 0; }
-  div[data-testid="stMetricValue"] { font-size: 1.6rem; }
+@import url('https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700&display=swap');
+html, body, [class*="st-"], button, input, textarea { font-family: 'Exo 2', sans-serif; }
+/* keep Streamlit's icon font for icons (otherwise they show as words like "arrow_right") */
+span[data-testid="stIconMaterial"], [class*="material-symbols"], .material-icons {
+  font-family: 'Material Symbols Rounded' !important; }
+.stApp {
+  background:
+    radial-gradient(1200px 600px at 85% -10%, rgba(124,58,237,.35), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgba(91,33,182,.35), transparent 60%),
+    #0b0715;
+}
+.block-container { max-width: 1240px; padding-top: 1.4rem; padding-bottom: 3rem; }
+header[data-testid="stHeader"] { background: transparent; }
+
+/* glass cards = every bordered container */
+div[data-testid="stVerticalBlockBorderWrapper"]:has(> div > div[data-testid="stVerticalBlock"]),
+div[data-testid="stVerticalBlockBorderWrapper"] {
+  background: linear-gradient(160deg, rgba(255,255,255,.065), rgba(255,255,255,.02));
+  border: 1px solid rgba(255,255,255,.09) !important;
+  border-radius: 22px !important;
+  box-shadow: 0 10px 30px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.06);
+  backdrop-filter: blur(14px);
+}
+section[data-testid="stSidebar"] {
+  background: linear-gradient(180deg, #120b22, #0d0819);
+  border-right: 1px solid rgba(255,255,255,.06);
+}
+
+/* buttons: purple primary, white "Continue"-style pills for the rest */
+.stButton button, .stDownloadButton button, .stFormSubmitButton button {
+  border-radius: 999px !important; font-weight: 600;
+}
+.stButton button[kind="primary"], .stFormSubmitButton button[kind="primaryFormSubmit"] {
+  background: linear-gradient(135deg, #8b5cf6, #6d28d9); border: none;
+  box-shadow: 0 6px 18px rgba(124,58,237,.45);
+}
+.stButton button[kind="secondary"] {
+  background: rgba(255,255,255,.92); color: #1b1030; border: none;
+}
+.stButton button[kind="secondary"]:hover { background: #fff; color: #5b21b6; }
+.stButton button[kind="tertiary"] { color: #c4b5fd; }
+
+/* section switcher looks like the app's top tabs */
+div[data-testid="stButtonGroup"] button { border-radius: 999px !important; }
+
+/* text inputs / chat input */
+div[data-baseweb="input"], div[data-baseweb="textarea"], div[data-testid="stChatInput"] > div {
+  border-radius: 999px !important; background: rgba(255,255,255,.06) !important;
+}
+div[data-testid="stChatInput"] textarea { min-height: 0 !important; }
+
+/* dashboard pieces */
+.topbar-title { font-size: 2rem !important; font-weight: 700; line-height: 1.2; letter-spacing: .3px; }
+.chip { display:inline-flex; align-items:center; gap:.5rem; padding:.35rem .75rem;
+        border-radius:999px; background:rgba(255,255,255,.06);
+        border:1px solid rgba(255,255,255,.08); font-size:.85rem; }
+.avatar { width:30px; height:30px; border-radius:50%; display:inline-grid; place-items:center;
+          background:linear-gradient(135deg,#f9a8d4,#a78bfa); font-weight:700; color:#1b1030; }
+.stat-big { font-size: 1.7rem; font-weight: 700; line-height: 1.1; }
+.stat-sub { font-size: .78rem; opacity: .65; }
+.up { color: #4ade80; font-size: .72rem; } .down { color: #f87171; font-size: .72rem; }
+.ring { --p: 0; width: 112px; height: 112px; border-radius: 50%; margin: auto;
+        background: conic-gradient(#a78bfa calc(var(--p) * 1%), rgba(255,255,255,.08) 0);
+        display: grid; place-items: center; box-shadow: 0 0 30px rgba(139,92,246,.35); }
+.ring::before { content: ""; width: 84px; height: 84px; border-radius: 50%; background: #150d26;
+                grid-area: 1 / 1; }
+.ring span { grid-area: 1 / 1; font-size: 1.35rem; font-weight: 700; z-index: 1; }
+.orb { width: 120px; height: 120px; border-radius: 50%; margin: .6rem auto 1rem;
+       background: radial-gradient(circle at 32% 28%, #f0e7ff 0%, #b18cff 18%, #6d28d9 45%,
+                   #2e0f6b 72%, #12052c 100%);
+       box-shadow: 0 0 45px rgba(139,92,246,.75), inset -12px -16px 30px rgba(0,0,0,.45);
+       animation: float 5s ease-in-out infinite; }
+@keyframes float { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-8px) } }
+.hello { font-size: 1.5rem; font-weight: 700; margin: 0; }
+.hello-emoji { font-size: 4.2rem; text-align: right; line-height: 1; }
+.lesson-title { font-weight: 600; margin-bottom: .25rem; }
+.bar { height: 6px; border-radius: 999px; background: rgba(255,255,255,.12); overflow: hidden; }
+.bar > div { height: 100%; border-radius: 999px; background: linear-gradient(90deg,#c4b5fd,#fff); }
+.slot { border-left: 2px solid rgba(167,139,250,.6); padding: .35rem .7rem; margin: .45rem 0;
+        border-radius: 0 12px 12px 0; background: rgba(139,92,246,.10); }
+.slot small { opacity: .7; }
+
+/* phones: tighter spacing, smaller headings (Streamlit stacks columns below ~640px) */
+@media (max-width: 640px) {
+  .block-container { padding: .8rem .7rem 3rem; }
+  .topbar-title { font-size: 1.5rem !important; }
+  .hello { font-size: 1.25rem; } .hello-emoji { font-size: 3rem; }
+  .stat-big { font-size: 1.4rem; }
+  div[data-testid="stVerticalBlockBorderWrapper"] { border-radius: 18px !important; }
+  /* rows INSIDE a card (Study|Quiz buttons, stat pairs) stay side by side on phones */
+  div[data-testid="stHorizontalBlock"] div[data-testid="stHorizontalBlock"] {
+    flex-wrap: nowrap !important; gap: .5rem !important; }
+  div[data-testid="stHorizontalBlock"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+    min-width: 0 !important; flex: 1 1 0 !important; width: auto !important; }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -28,7 +124,8 @@ if not os.getenv("GEMINI_API_KEY"):
     st.error("GEMINI_API_KEY is missing. Copy .env.example to .env and add your key.")
     st.stop()
 
-PAGES = ["💬 Ask", "📝 Quiz", "🎯 Important topics", "🗺️ Study plan"]
+HOME, ASK, QUIZ, TOPICS, PLAN = ("🏠 Overview", "💬 Ask", "📝 Quiz", "🎯 Topics", "🗺️ Study plan")
+PAGES = [HOME, ASK, QUIZ, TOPICS, PLAN]
 PRIORITY_ICON = {"High": "🔴 High", "Medium": "🟡 Medium", "Low": "🟢 Low"}
 SUGGESTIONS = ["Explain PEAS with an example", "What are the types of agents?",
                "Difference between BFS and DFS", "What is knowledge representation?"]
@@ -44,8 +141,9 @@ if "kb" not in st.session_state:
     st.session_state.files = {}  # file name -> {"pages": n, "chunks": n}
     st.session_state.docs = {}  # file name -> (pdf bytes, page texts), for topic analysis
     st.session_state.messages = []
-    st.session_state.page = PAGES[0]
+    st.session_state.page = HOME
 kb: KnowledgeBase = st.session_state.kb
+progress = prog.load()  # quiz history, units done, exam date... (progress.json)
 
 
 def read_with_progress(name: str, data: bytes) -> list[str]:
@@ -137,6 +235,12 @@ with st.sidebar:
         st.session_state.messages = []
         st.rerun()
 
+    with st.expander("👤 Profile"):
+        name = st.text_input("Your name", progress["name"])
+        if name.strip() and name.strip() != progress["name"]:
+            progress["name"] = name.strip()
+            prog.save(progress)
+
     with st.expander("⚙️ How it works"):
         st.markdown(
             "1. **OCR** — Gemini vision reads handwritten pages\n"
@@ -151,21 +255,164 @@ with st.sidebar:
 
 # ---------- header + navigation ----------
 
+def search_notes():
+    """Top-bar search box: ask the typed text in the Ask section."""
+    text = st.session_state.top_search.strip()
+    st.session_state.top_search = ""
+    if text:
+        go(ASK, pending_question=text)
+
+
+page = st.session_state.get("page") or HOME  # clicking the selected button again deselects it
 total_pages = sum(f["pages"] for f in st.session_state.files.values())
-st.markdown(
-    f"<div class='hero'><h1>📚 AI Exam Prep Assistant</h1>"
-    f"<p>{len(st.session_state.files)} file(s) · {total_pages} pages · "
-    f"{len(kb.chunks)} chunks — answers come only from your notes, with page numbers.</p></div>",
-    unsafe_allow_html=True,
-)
-page = st.segmented_control("Section", PAGES, key="page", label_visibility="collapsed")
-page = page or PAGES[0]  # clicking the selected button again deselects it
+
+with st.container(border=True):
+    c1, c2, c3 = st.columns([1.3, 2, 1.2], vertical_alignment="center")
+    c1.markdown(f"<div class='topbar-title'>{page.split(' ', 1)[1]}</div>", unsafe_allow_html=True)
+    c2.text_input("Search", key="top_search", placeholder="🔍  Search your notes...",
+                  label_visibility="collapsed", on_change=search_notes)
+    initial = html.escape(progress["name"][:1].upper() or "S")
+    c3.markdown(
+        f"<div style='text-align:right'><span class='chip'>📄 {total_pages} pages</span> "
+        f"<span class='chip'><span class='avatar'>{initial}</span>"
+        f"<span><b>{html.escape(progress['name'])}</b><br><small>AI course</small></span></span></div>",
+        unsafe_allow_html=True)
+    st.segmented_control("Section", PAGES, key="page", label_visibility="collapsed")
 st.write("")
+
+
+# ---------- 🏠 Overview: dashboard ----------
+
+def ask_from_dashboard():
+    text = st.session_state.dash_ask.strip()
+    st.session_state.dash_ask = ""
+    if text:
+        go(ASK, pending_question=text)
+
+
+def set_exam_date():
+    d = st.session_state.exam_date_input
+    progress["exam_date"] = d.isoformat() if d else None
+    prog.save(progress)
+
+
+if page == HOME:
+    plan_rows = progress["plan"]
+    left, mid, right = st.columns([1.05, 1, 1.05], gap="medium")
+
+    # ----- left: study schedule (the "calendar") -----
+    with left, st.container(border=True):
+        st.markdown("#### 📅 Study schedule")
+        today = date.today()
+        exam = date.fromisoformat(progress["exam_date"]) if progress["exam_date"] else None
+        st.date_input("Exam date", value=exam, min_value=today + timedelta(days=1),
+                      key="exam_date_input", on_change=set_exam_date, format="DD/MM/YYYY")
+        if not plan_rows:
+            st.caption("Build a study plan from your syllabus + PYQs and your days will be "
+                       "planned here, most important units first.")
+            st.button("🗺️ Build study plan", width="stretch", type="primary",
+                      on_click=go, args=(PLAN,))
+        elif not exam or exam <= today:
+            st.caption("Set your exam date to spread your units over the days left.")
+        else:
+            sched = prog.schedule(plan_rows, exam, today)
+            st.markdown(f"<span class='chip'>⏳ {(exam - today).days} days to exam</span>",
+                        unsafe_allow_html=True)
+            days = sorted(sched)[:6]
+            labels = {d: d.strftime("%a %d") for d in days}
+            picked = st.segmented_control("Day", days, format_func=labels.get, default=days[0],
+                                          key="sched_day", label_visibility="collapsed")
+            for unit in sched.get(picked or days[0], []):
+                if unit.get("revision"):
+                    st.markdown("<div class='slot'>🔁 <b>Revision + PYQ practice</b><br>"
+                                "<small>Go through every High-priority unit again</small></div>",
+                                unsafe_allow_html=True)
+                    continue
+                done = unit["title"] in progress["units_done"]
+                st.markdown(
+                    f"<div class='slot'>{'✅' if done else PRIORITY_ICON[unit['priority']][:1]} "
+                    f"<b>Unit {unit['unit']}: {html.escape(unit['title'])}</b><br>"
+                    f"<small>{unit['weightage']:.0%} weightage · {unit['priority']} priority</small>"
+                    f"</div>", unsafe_allow_html=True)
+                b1, b2 = st.columns(2)
+                b1.button("Study", key=f"s_{picked}_{unit['unit']}", width="stretch", on_click=go,
+                          args=(ASK,),
+                          kwargs={"pending_question": f"Summarise {unit['title']} for my exam"})
+                b2.button("Quiz", key=f"q_{picked}_{unit['unit']}", width="stretch",
+                          on_click=go, args=(QUIZ,), kwargs={"auto_quiz_topic": unit["title"]})
+
+    # ----- middle: stats, progress ring, recent quizzes -----
+    with mid:
+        acc = prog.accuracy(progress)
+        with st.container(border=True):
+            a, b = st.columns(2)
+            a.markdown(f"<div style='text-align:center'><div class='stat-big'>{prog.points(progress)}"
+                       f"</div><div class='stat-sub'>Quiz points</div>"
+                       f"<div class='up'>{len(progress['quizzes'])} quizzes taken</div></div>",
+                       unsafe_allow_html=True)
+            b.markdown(f"<div style='text-align:center'><div class='stat-big'>"
+                       f"{f'{acc:.0%}' if acc is not None else '—'}</div>"
+                       f"<div class='stat-sub'>Accuracy</div>"
+                       f"<div class='up'>{progress['asked']} questions asked</div></div>",
+                       unsafe_allow_html=True)
+
+        with st.container(border=True):
+            total_units = len(plan_rows)
+            done_units = sum(u["title"] in progress["units_done"] for u in plan_rows)
+            pct = round(100 * done_units / total_units) if total_units else 0
+            a, b = st.columns([1.1, 1], vertical_alignment="center")
+            a.markdown(f"<div class='stat-big'>{done_units}/{total_units or '—'}</div>"
+                       f"<div class='stat-sub'>Units completed</div>", unsafe_allow_html=True)
+            b.markdown(f"<div class='ring' style='--p:{pct}'><span>{pct}%</span></div>",
+                       unsafe_allow_html=True)
+
+        with st.container(border=True):
+            st.markdown("#### Last quizzes")
+            recent = progress["quizzes"][::-1][:3]
+            if not recent:
+                st.caption("No quizzes yet — test yourself on any topic.")
+                st.button("📝 Start a quiz", width="stretch", on_click=go, args=(QUIZ,))
+            for i, q in enumerate(recent):
+                score = q["score"] / q["total"] if q["total"] else 0
+                with st.container(border=True):
+                    st.markdown(
+                        f"<div class='lesson-title'>{html.escape(q['topic'])}</div>"
+                        f"<div class='stat-sub'>{'🏆 Perfect!' if score == 1 else '👍 Good going' if score >= .6 else '📖 You can do better!'}"
+                        f" · {q['score']}/{q['total']}</div>"
+                        f"<div class='bar'><div style='width:{score:.0%}'></div></div>",
+                        unsafe_allow_html=True)
+                    a, b = st.columns([1, 1], vertical_alignment="center")
+                    a.caption(prog.ago(q["at"]))
+                    b.button("Continue", key=f"cont{i}", width="stretch", on_click=go,
+                             args=(QUIZ,), kwargs={"auto_quiz_topic": q["topic"]})
+
+    # ----- right: greeting + AI assistant -----
+    with right:
+        with st.container(border=True):
+            a, b = st.columns([2, 1], vertical_alignment="center")
+            next_up = next((u for u in plan_rows if u["title"] not in progress["units_done"]), None)
+            a.markdown(f"<div class='hello'>Hi, {html.escape(progress['name'])}!</div>"
+                       f"<div class='stat-sub' style='font-size:.95rem'>Ready to make progress today?"
+                       + (f"<br>Next up: <b>{html.escape(next_up['title'])}</b>" if next_up else "")
+                       + "</div>", unsafe_allow_html=True)
+            b.markdown("<div class='hello-emoji'>🧑‍🎓</div>", unsafe_allow_html=True)
+
+        with st.container(border=True):
+            st.markdown("#### AI Assistant")
+            st.markdown("<div class='orb'></div>", unsafe_allow_html=True)
+            st.pills("Tips", ["Explain PEAS", "Types of agents", "BFS vs DFS"], key="dash_tip",
+                     label_visibility="collapsed",
+                     on_change=lambda: (go(ASK, pending_question=st.session_state.dash_tip),
+                                        st.session_state.update(dash_tip=None)))
+            st.text_input("Ask", key="dash_ask", placeholder="🎙️  Ask me about your notes...",
+                          label_visibility="collapsed", on_change=ask_from_dashboard)
+            st.caption(f"Answers only from your {len(st.session_state.files)} file(s) · "
+                       f"{len(kb.chunks)} chunks, with page numbers.")
 
 
 # ---------- 💬 Ask: chat with your notes ----------
 
-if page == PAGES[0]:
+if page == ASK:
     if not st.session_state.messages:
         with st.container(border=True):
             st.markdown("#### 👋 Ask anything from your notes")
@@ -192,6 +439,8 @@ if page == PAGES[0]:
                 try:
                     reply, hits = answer(question, kb)
                     reply = with_page_badges(reply, hits)
+                    progress["asked"] += 1
+                    prog.save(progress)
                 except Exception as e:
                     reply, hits = f"⚠️ Something went wrong: {e}", []
             st.markdown(reply)
@@ -216,7 +465,7 @@ def new_quiz(topic: str, n: int, level: str):
     st.session_state.quiz_round = st.session_state.get("quiz_round", 0) + 1  # fresh widgets
 
 
-if page == PAGES[1]:
+if page == QUIZ:
     with st.container(border=True):
         st.markdown("#### 📝 Practice quiz")
         st.caption("MCQs written from your notes, then double-checked against them by a second AI pass.")
@@ -283,6 +532,8 @@ if page == PAGES[1]:
         if submitted:
             st.session_state.quiz_picks = picks
             st.session_state.quiz_checked = True
+            prog.record_quiz(progress, st.session_state.quiz_topic,
+                             sum(a == q["answer_index"] for a, q in zip(picks, quiz)), len(quiz))
             st.rerun()
 
         if checked:
@@ -299,7 +550,7 @@ if page == PAGES[1]:
 
 # ---------- 🎯 Important topics: most-asked exam questions ----------
 
-if page == PAGES[2]:
+if page == TOPICS:
     with st.container(border=True):
         st.markdown("#### 🎯 What should I study first?")
         st.caption("Finds every exam question in your notes and past papers, groups similar ones "
@@ -356,9 +607,9 @@ if page == PAGES[2]:
                 c1.markdown(f"**{rank}. {t['topic']}**  \n{badges}")
                 b1, b2 = c2.columns(2)
                 b1.button("📝 Quiz", key=f"tq{rank}", width="stretch", help="Quiz me on this",
-                          on_click=go, args=(PAGES[1],), kwargs={"auto_quiz_topic": t["topic"]})
+                          on_click=go, args=(QUIZ,), kwargs={"auto_quiz_topic": t["topic"]})
                 b2.button("💬 Explain", key=f"te{rank}", width="stretch",
-                          help="Explain this from my notes", on_click=go, args=(PAGES[0],),
+                          help="Explain this from my notes", on_click=go, args=(ASK,),
                           kwargs={"pending_question": f"Explain {t['topic']} for my exam"})
                 with st.expander(f"{len(t['questions'])} question(s)", expanded=rank == 1):
                     for q in t["questions"]:
@@ -369,7 +620,7 @@ if page == PAGES[2]:
 
 # ---------- 🗺️ Study plan: syllabus + PYQs -> which chapter first, with weightage ----------
 
-if page == PAGES[3]:
+if page == PLAN:
     st.session_state.setdefault("plan_syllabus", None)  # (file name, pdf bytes)
     st.session_state.setdefault("plan_pyqs", {})  # file name -> pdf bytes
     # PDFs in the syllabus/ and pyqs/ folders are picked up automatically
@@ -421,6 +672,10 @@ if page == PAGES[3]:
                     papers[pname] = extract_questions(pdata, read_with_progress(pname, pdata), pname)
             with st.spinner("Matching every question to a syllabus unit..."):
                 st.session_state.plan = study_plan(syllabus, papers)
+            # remember the ranking for the Overview schedule and progress ring
+            progress["plan"] = [{k: r[k] for k in ("unit", "title", "weightage", "priority", "order")}
+                                for r in st.session_state.plan["rows"]]
+            prog.save(progress)
         except Exception as e:
             st.error(f"⚠️ Couldn't build the plan: {e}")
 
@@ -498,10 +753,18 @@ if page == PAGES[3]:
                             f"{PRIORITY_ICON[r['priority']]} · {r['why']}")
                 b1, b2 = c2.columns(2)
                 b1.button("📝 Quiz", key=f"pq{r['unit']}", width="stretch",
-                          on_click=go, args=(PAGES[1],), kwargs={"auto_quiz_topic": r["title"]})
+                          on_click=go, args=(QUIZ,), kwargs={"auto_quiz_topic": r["title"]})
                 b2.button("💬 Explain", key=f"pe{r['unit']}", width="stretch", on_click=go,
-                          args=(PAGES[0],),
+                          args=(ASK,),
                           kwargs={"pending_question": f"Summarise {r['title']} for my exam"})
+                done = st.checkbox("Mark as done", value=r["title"] in progress["units_done"],
+                                   key=f"done{r['unit']}")
+                if done != (r["title"] in progress["units_done"]):
+                    if done:
+                        progress["units_done"].append(r["title"])
+                    else:
+                        progress["units_done"].remove(r["title"])
+                    prog.save(progress)
                 with st.expander(f"Topics & {r['n_questions']} PYQ question(s)"):
                     st.markdown("**Topics:** " + ", ".join(plain(t) for t in r["topics"]))
                     for q in r["questions"]:
