@@ -258,10 +258,11 @@ if progress is None:
 
 def read_with_progress(name: str, data: bytes) -> list[str]:
     """read_pages() with a progress bar while scanned pages are OCR'd."""
-    bar = st.progress(0.0, text=f"Reading {name}...")
+    bar = st.progress(0.0, text=f"Opening {name}...")
 
     def progress(done, total):
-        bar.progress(done / total, text=f"Reading scanned page {done}/{total} of {name}...")
+        bar.progress(done / total, text=f"Reading {name}: page {done} of {total} "
+                                        "(handwritten pages are read by AI — keep this page open)")
 
     pages = read_pages(data, progress)
     bar.empty()
@@ -278,6 +279,26 @@ def add_pdf(name: str, data: bytes):
     st.session_state.files[name] = {"pages": len(pages), "chunks": len(chunks)}
     st.session_state.docs[name] = (data, pages)
     st.session_state.pop("topics", None)  # new file -> topic analysis is out of date
+
+
+def queue_pdf(name: str, data: bytes):
+    """Remember an uploaded notes PDF until it's read. Kept in the session (not in the upload
+    widget), so switching sections or a phone interrupting the page doesn't lose it."""
+    if name not in st.session_state.files:
+        st.session_state.setdefault("pending", {}).setdefault(name, data)
+
+
+def process_pending():
+    """Read every queued notes PDF, showing progress in the main area (the sidebar is hidden
+    on phones). If interrupted, the next run continues — OCR resumes from saved pages."""
+    for name, data in list(st.session_state.get("pending", {}).items()):
+        try:
+            add_pdf(name, data)
+            n = st.session_state.files[name]["pages"]
+            st.toast(f"Added {name}: {n} page{'s' if n != 1 else ''}", icon=":material/check_circle:")
+        except Exception as e:
+            st.error(f"Couldn't read {name}: {e}", icon=":material/error:")
+        st.session_state.pending.pop(name, None)
 
 
 # ---------- helpers ----------
@@ -331,7 +352,7 @@ with st.sidebar:
         add_pdf(pdf.name, pdf.read_bytes())
     for f in st.file_uploader("Add notes or past papers (PDF)", type="pdf",
                               accept_multiple_files=True) or []:
-        add_pdf(f.name, f.getvalue())
+        queue_pdf(f.name, f.getvalue())
 
     st.markdown("**Loaded**")
     for name, info in st.session_state.files.items():
@@ -400,6 +421,8 @@ with st.container(border=True):
     st.segmented_control("Section", PAGES, key="page", label_visibility="collapsed")
 st.write("")
 
+process_pending()  # read any uploaded notes here, so progress shows on whichever page is open
+
 # New visitors have no notes yet: make uploading them the obvious first step
 # (the sidebar uploader is hidden behind a button on phones).
 if not st.session_state.files and page != PLAN:
@@ -411,11 +434,12 @@ if not st.session_state.files and page != PLAN:
         a.caption("Have a course handout/syllabus or previous year papers? They go in Study plan.")
         b.button("Open Study plan", icon=":material/map:", key="to_plan", width="stretch",
                  on_click=go, args=(PLAN,))
-        for f in st.file_uploader("Notes (PDF)", type="pdf", accept_multiple_files=True,
-                                  key="main_upload", label_visibility="collapsed") or []:
-            add_pdf(f.name, f.getvalue())
-        if st.session_state.files:
-            st.rerun()
+        new_files = st.file_uploader("Notes (PDF)", type="pdf", accept_multiple_files=True,
+                                     key="main_upload", label_visibility="collapsed") or []
+        for f in new_files:
+            queue_pdf(f.name, f.getvalue())
+        if new_files:
+            st.rerun()  # read them at the top of the page (process_pending), with progress
     if page != HOME:
         st.stop()
 
@@ -1056,7 +1080,8 @@ if page == PLAN:
     build = rebuild or (files_now is not None and files_now != st.session_state.get("plan_files"))
 
     if build:
-        st.session_state.plan_files = files_now
+        # plan_files is only recorded once the build finishes (or fails with an error), so a
+        # build interrupted on a phone simply runs again next time, resuming any saved OCR pages
         try:
             name, data = st.session_state.plan_syllabus
             with st.spinner("Reading the syllabus units..."):
@@ -1075,6 +1100,7 @@ if page == PLAN:
             prog.save(progress)
         except Exception as e:
             st.error(f"Couldn't build the plan: {e}", icon=":material/error:")
+        st.session_state.plan_files = files_now
 
     plan = st.session_state.get("plan")
     if plan and not plan["rows"]:

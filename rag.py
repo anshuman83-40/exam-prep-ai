@@ -10,7 +10,9 @@ import io
 import json
 import os
 import re
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -43,7 +45,8 @@ Transcribe ALL the text exactly as written, top to bottom.
 - Keep headings, bullet points and question numbers.
 - Write arrows as "->".
 - Fix obvious spelling mistakes only when you are sure of the word.
-- For a drawing or diagram, write one line: [Diagram: short description].
+- For a drawing or diagram, write [Diagram: description] AND write out every number,
+  label, grid row, node name and formula inside it.
 Output only the transcribed text, nothing else."""
 
 ANSWER_PROMPT = """You are a friendly study assistant helping a student prepare for exams.
@@ -103,27 +106,106 @@ def clean(text: str) -> str:
     return "\n".join(line for line in lines if line)
 
 
+OCR_BATCH = 3  # pages per Gemini request (fewer requests -> fewer free-tier rate limits)
+OCR_WORKERS = 3  # requests running at the same time
+
+OCR_BATCH_PROMPT = """These {n} images are consecutive pages of a student's notes (may be
+handwritten). Transcribe EACH page separately, top to bottom, following these rules:
+- Keep headings, bullet points, question numbers and line breaks.
+- Write arrows as "->".
+- Fix obvious spelling mistakes only when you are sure of the word.
+- Give every page the same full detail you would give it alone; never shorten a page.
+- For a drawing or diagram, write [Diagram: description] AND write out every number,
+  label, grid row, node name and formula inside it (e.g. "[Diagram: 3x3 grid 2 8 3 / 1 _ 4 /
+  7 6 5, arrows R L U D]").
+Return exactly {n} strings in "pages": the text of image 1, image 2, ... in order."""
+
+
+class PageTexts(BaseModel):
+    pages: list[str]
+
+
+def page_image(doc, i: int) -> types.Part:
+    buf = io.BytesIO()
+    doc[i].render(scale=2).to_pil().convert("RGB").save(buf, format="JPEG", quality=85)
+    return types.Part.from_bytes(data=buf.getvalue(), mime_type="image/jpeg")
+
+
+def ocr_job(client, idxs: list[int], images: list, save) -> None:
+    """OCR a few pages in one request (falls back to one page per request if the reply
+    doesn't have one text per page), then hand the results to `save`. Runs in a worker thread."""
+    results: dict[int, str] = {}
+    if len(idxs) > 1:
+        try:
+            raw = generate(client, [*images, OCR_BATCH_PROMPT.format(n=len(idxs))],
+                           config=types.GenerateContentConfig(
+                               response_mime_type="application/json", response_schema=PageTexts))
+            texts = PageTexts.model_validate_json(raw).pages
+            if len(texts) == len(idxs):
+                results = {i: clean(t) for i, t in zip(idxs, texts)}
+        except Exception:
+            results = {}
+    for i, image in zip(idxs, images):
+        if i not in results:
+            results[i] = clean(generate(client, [image, OCR_PROMPT]))
+    save(results)
+
+
 def read_pages(data: bytes, on_progress=None) -> list[str]:
-    """Return the text of each page. Pages without a text layer are OCR'd with Gemini.
-    Results are cached in notes_text/ by file content, so each PDF is only OCR'd once."""
-    cache_file = CACHE_DIR / f"{hashlib.sha1(data).hexdigest()[:16]}.json"
+    """Return the text of each page. Pages without a text layer are OCR'd with Gemini,
+    several pages per request and several requests in parallel.
+
+    Every finished page is saved straight away (notes_text/<hash>.partial.json), so if the
+    run is interrupted (phone screen locks, user taps elsewhere) it resumes where it stopped.
+    The finished result is cached by file content, so each PDF is only OCR'd once."""
+    digest = hashlib.sha1(data).hexdigest()[:16]
+    cache_file = CACHE_DIR / f"{digest}.json"
     if cache_file.exists():
         return json.loads(cache_file.read_text(encoding="utf-8"))
 
     pages = [clean(p.extract_text() or "") for p in PdfReader(io.BytesIO(data)).pages]
     empty = [i for i, t in enumerate(pages) if not t]
-    if empty:
-        client = get_client()
-        doc = pdfium.PdfDocument(data)
-        for n, i in enumerate(empty, start=1):
-            if on_progress:
-                on_progress(n, len(empty))
-            buf = io.BytesIO()
-            doc[i].render(scale=2).to_pil().convert("RGB").save(buf, format="JPEG", quality=85)
-            image = types.Part.from_bytes(data=buf.getvalue(), mime_type="image/jpeg")
-            pages[i] = clean(generate(client, [image, OCR_PROMPT]))
-
     CACHE_DIR.mkdir(exist_ok=True)
+    if empty:
+        partial_file = CACHE_DIR / f"{digest}.partial.json"
+        try:
+            done = {int(k): v for k, v in json.loads(partial_file.read_text(encoding="utf-8")).items()}
+        except (FileNotFoundError, json.JSONDecodeError, ValueError):
+            done = {}
+        lock = threading.Lock()
+
+        def save(results: dict[int, str]):  # called from worker threads
+            with lock:
+                done.update(results)
+                partial_file.write_text(json.dumps({str(k): v for k, v in done.items()},
+                                                   ensure_ascii=False), encoding="utf-8")
+
+        todo = [i for i in empty if i not in done]
+        if on_progress:
+            on_progress(len(empty) - len(todo), len(empty))
+        if todo:
+            client = get_client()
+            doc = pdfium.PdfDocument(data)  # rendering stays on this thread (pdfium isn't thread-safe)
+            pool = ThreadPoolExecutor(max_workers=OCR_WORKERS)
+            try:
+                futures = []
+                for b in range(0, len(todo), OCR_BATCH):
+                    idxs = todo[b:b + OCR_BATCH]
+                    futures.append(pool.submit(ocr_job, client, idxs,
+                                               [page_image(doc, i) for i in idxs], save))
+                for future in as_completed(futures):
+                    future.result()  # re-raise a real failure (e.g. invalid API key)
+                    if on_progress:
+                        with lock:
+                            finished = sum(i in done for i in empty)
+                        on_progress(finished, len(empty))
+            finally:
+                # if interrupted: drop queued batches; running ones still finish and save()
+                pool.shutdown(wait=False, cancel_futures=True)
+        for i in empty:
+            pages[i] = done[i]
+        partial_file.unlink(missing_ok=True)
+
     cache_file.write_text(json.dumps(pages, ensure_ascii=False, indent=1), encoding="utf-8")
     return pages
 
