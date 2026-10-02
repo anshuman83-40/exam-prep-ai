@@ -4,7 +4,10 @@ Turn your course notes — **even handwritten, photographed ones** — into a pe
 
 - 🏠 **Overview dashboard** (dark glass UI, works on phone and laptop): study schedule up to
   your exam date, quiz points & accuracy, units-completed ring, recent quizzes with *Continue*,
-  and an AI assistant box. Progress is saved locally in `progress.json`.
+  and an AI assistant box.
+- 👋 **Personal profiles**: every visitor enters their name on a welcome screen and gets their
+  own dashboard ("Hi, Priya!"). Progress is saved per student in `profiles/<id>.json`; the id is
+  kept in the page link, so bookmarking it brings you back. *Switch user* in the sidebar.
 
 - 💬 **Ask** questions and get answers written *only* from your notes, with page numbers
 - 📝 **Quiz** yourself with MCQs generated from your notes and fact-checked by a second AI pass

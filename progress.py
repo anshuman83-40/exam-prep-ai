@@ -1,30 +1,70 @@
-"""Saves the student's progress (quiz scores, units done, exam date, plan) between sessions.
+"""Saves each student's progress (name, quiz scores, units done, exam date, plan, flashcards).
 
-Stored as progress.json in the project folder (kept out of git).
+Every student has their own profile file, profiles/<id>.json (kept out of git). The id is a
+random code kept in the page link (?u=<id>), so bookmarking the link brings you back.
 """
 
 import json
 import math
+import re
 import uuid
 from datetime import date, datetime, timedelta
 
 from rag import PROJECT_DIR
 
-PROGRESS_FILE = PROJECT_DIR / "progress.json"
-DEFAULTS = {"name": "Anshuman", "exam_date": None, "quizzes": [], "asked": 0,
+PROFILE_DIR = PROJECT_DIR / "profiles"
+LEGACY_FILE = PROJECT_DIR / "progress.json"  # single-user file from before profiles existed
+DEFAULTS = {"name": "", "course": "", "exam_date": None, "quizzes": [], "asked": 0,
             "units_done": [], "plan": [], "cards": [], "mocks": []}
+ID_PATTERN = re.compile(r"^[0-9a-f]{12}$")  # ids come from the URL: never trust them as paths
 
 
-def load() -> dict:
+def valid_id(uid: str | None) -> bool:
+    return bool(uid) and bool(ID_PATTERN.match(uid))
+
+
+def _path(uid: str):
+    return PROFILE_DIR / f"{uid}.json"
+
+
+def load(uid: str | None) -> dict | None:
+    """The profile for this id, or None if the id is invalid or unknown."""
+    if not valid_id(uid):
+        return None
     try:
-        saved = json.loads(PROGRESS_FILE.read_text(encoding="utf-8"))
+        saved = json.loads(_path(uid).read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError):
-        saved = {}
-    return {**DEFAULTS, **saved}
+        return None
+    return {**DEFAULTS, **saved, "id": uid}
 
 
 def save(progress: dict):
-    PROGRESS_FILE.write_text(json.dumps(progress, indent=1, ensure_ascii=False), encoding="utf-8")
+    PROFILE_DIR.mkdir(exist_ok=True)
+    _path(progress["id"]).write_text(json.dumps(progress, indent=1, ensure_ascii=False),
+                                     encoding="utf-8")
+
+
+def create(name: str, course: str = "", base: dict | None = None) -> dict:
+    """Start a new profile (optionally from existing progress, e.g. the legacy file)."""
+    progress = {**DEFAULTS, **(base or {}), "name": name.strip()[:40],
+                "course": (course.strip() or (base or {}).get("course", ""))[:60],
+                "id": uuid.uuid4().hex[:12]}
+    save(progress)
+    return progress
+
+
+def retire_legacy():
+    """After the old single-user file is moved into a profile, keep it only as a backup."""
+    if LEGACY_FILE.exists():
+        LEGACY_FILE.replace(LEGACY_FILE.with_name("progress.migrated.json"))
+
+
+def legacy() -> dict | None:
+    """Progress saved before profiles existed (one file for the whole app), if any."""
+    try:
+        return {**DEFAULTS, **json.loads(LEGACY_FILE.read_text(encoding="utf-8"))}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
 
 
 def record_quiz(progress: dict, topic: str, score: int, total: int):

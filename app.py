@@ -122,6 +122,9 @@ div[data-testid="stChatInput"] textarea { min-height: 0 !important; }
 .flash.back { font-size: 1.05rem; font-weight: 500; background: rgba(255,255,255,.06);
               border-color: rgba(255,255,255,.12); }
 .hello-art { text-align: right; }
+.hello-art.center { text-align: center; margin: .4rem 0 .2rem; }
+.welcome-title { font-size: 1.7rem; font-weight: 700; text-align: center; }
+.welcome-sub { text-align: center; opacity: .72; margin: .3rem 0 1rem; font-size: .95rem; }
 .hello-art svg { filter: drop-shadow(0 0 18px rgba(139,92,246,.6)); }
 
 /* phones: tighter spacing, smaller headings (Streamlit stacks columns below ~640px) */
@@ -201,7 +204,47 @@ if "kb" not in st.session_state:
     st.session_state.messages = []
     st.session_state.page = HOME
 kb: KnowledgeBase = st.session_state.kb
-progress = prog.load()  # quiz history, units done, exam date... (progress.json)
+
+
+# ---------- Welcome: every visitor enters their name and gets their own profile ----------
+
+def start_profile(name: str, course: str = "", base: dict | None = None):
+    new = prog.create(name, course, base)
+    st.query_params["u"] = new["id"]  # the profile lives in the link, so a bookmark brings you back
+
+
+progress = prog.load(st.query_params.get("u"))  # name, quiz history, plan... (profiles/<id>.json)
+if progress is None:
+    _, mid_col, _ = st.columns([1, 1.4, 1])
+    with mid_col, st.container(border=True):
+        st.markdown(GRAD_CAP_SVG.replace("hello-art", "hello-art center"), unsafe_allow_html=True)
+        st.markdown("<div class='welcome-title'>Welcome to Exam Prep AI</div>"
+                    "<div class='welcome-sub'>Your notes turned into answers, quizzes, mock exams "
+                    "and a study plan. Let's set up your space.</div>", unsafe_allow_html=True)
+        with st.form("welcome", border=False):
+            name = st.text_input("What's your name?", max_chars=40, placeholder="e.g. Priya")
+            course = st.text_input("Course or subject (optional)", max_chars=60,
+                                   placeholder="e.g. B.Tech CSE · Artificial Intelligence")
+            go_in = st.form_submit_button("Get started", icon=":material/arrow_forward:",
+                                          type="primary", width="stretch")
+        if go_in:
+            if name.strip():
+                start_profile(name, course)
+                st.rerun()
+            else:
+                st.warning("Please enter your name.")
+        if st.query_params.get("u"):
+            st.caption("That profile link wasn't found, so you can start a new profile here.")
+        old = prog.legacy()
+        if old and old.get("name"):
+            st.divider()
+            st.caption("Progress from before profiles were added was found on this computer.")
+            if st.button(f"Continue as {old['name']}", icon=":material/history:", width="stretch"):
+                start_profile(old["name"], base=old)
+                prog.retire_legacy()
+                st.rerun()
+        st.caption("Tip: bookmark the page after you start. Your progress is saved to that link.")
+    st.stop()
 
 
 def read_with_progress(name: str, data: bytes) -> list[str]:
@@ -294,10 +337,17 @@ with st.sidebar:
         st.rerun()
 
     with st.expander("Profile", icon=":material/person:"):
-        name = st.text_input("Your name", progress["name"])
-        if name.strip() and name.strip() != progress["name"]:
-            progress["name"] = name.strip()
+        name = st.text_input("Your name", progress["name"], max_chars=40)
+        course = st.text_input("Course", progress["course"], max_chars=60)
+        if (name.strip() and name.strip() != progress["name"]) or course.strip() != progress["course"]:
+            progress["name"], progress["course"] = name.strip() or progress["name"], course.strip()
             prog.save(progress)
+        st.caption("Bookmark this page to come back to your progress. Your profile code:")
+        st.code(progress["id"], language=None)
+        if st.button("Switch user", icon=":material/logout:", width="stretch"):
+            st.query_params.clear()
+            st.session_state.clear()
+            st.rerun()
 
     with st.expander("How it works", icon=":material/settings:"):
         st.markdown(
@@ -981,7 +1031,7 @@ if page == PLAN:
             # remember the ranking for the Overview schedule and progress ring
             progress["plan"] = [{k: r[k] for k in ("unit", "title", "weightage", "priority", "order")}
                                 for r in st.session_state.plan["rows"]]
-            progress["course"] = st.session_state.plan["course"]
+            progress["course"] = progress["course"] or st.session_state.plan["course"]
             prog.save(progress)
         except Exception as e:
             st.error(f"Couldn't build the plan: {e}", icon=":material/error:")
