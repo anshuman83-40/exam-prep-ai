@@ -13,3 +13,6 @@ __pycache__/
 # Remove these lines only if you want them public in the repo / deployed demo.
 *.pdf
 notes_text/
+
+# Your personal progress (quiz scores, exam date)
+progress.json
