@@ -1,0 +1,63 @@
+{
+ "1. Vector search only": {
+  "Hit@1": 0.4117647058823529,
+  "Hit@5": 0.7058823529411765,
+  "MRR": 0.5245098039215687,
+  "misses": [
+   "How do you translate natural language sentences involving quantifiers into predicate logic?",
+   "How does bidirectional search work compared to standard tree traversal?",
+   "How are stack and queue operations used in tree traversal algorithms?",
+   "How do you solve cryptarithmetic puzzles using constraints and substitutions?",
+   "How are heuristic values evaluated for state spaces in puzzle problems?",
+   "How are heuristic values assigned to nodes in a search graph?",
+   "How do you derive logical conclusions from a given knowledge base?",
+   "How does Best-First Search select the next node to expand using an open list?",
+   "What is a major drawback of using greedy best-first search?",
+   "Explain PEAS with an example"
+  ],
+  "ms_per_query": 17.141782356809607
+ },
+ "2. Hybrid (vector + BM25)": {
+  "Hit@1": 0.4117647058823529,
+  "Hit@5": 0.7647058823529411,
+  "MRR": 0.5465686274509803,
+  "misses": [
+   "How do you translate natural language sentences involving quantifiers into predicate logic?",
+   "How does bidirectional search work compared to standard tree traversal?",
+   "How do you solve cryptarithmetic puzzles using constraints and substitutions?",
+   "How are heuristic values evaluated for state spaces in puzzle problems?",
+   "How are heuristic values assigned to nodes in a search graph?",
+   "How do you derive logical conclusions from a given knowledge base?",
+   "How does Best-First Search select the next node to expand using an open list?",
+   "What is a major drawback of using greedy best-first search?"
+  ],
+  "ms_per_query": 18.513767644489075
+ },
+ "3. Hybrid + small re-ranker": {
+  "Hit@1": 0.4411764705882353,
+  "Hit@5": 0.8529411764705882,
+  "MRR": 0.6049019607843137,
+  "misses": [
+   "What is the time complexity formula for Breadth-First Search?",
+   "How do you translate natural language sentences involving quantifiers into predicate logic?",
+   "How do you solve cryptarithmetic puzzles using constraints and substitutions?",
+   "How are heuristic values evaluated for state spaces in puzzle problems?",
+   "How are heuristic values assigned to nodes in a search graph?"
+  ],
+  "ms_per_query": 609.1143852921532
+ },
+ "4. Hybrid + re-ranker (app)": {
+  "Hit@1": 0.5294117647058824,
+  "Hit@5": 0.8529411764705882,
+  "MRR": 0.6691176470588234,
+  "misses": [
+   "How do you translate natural language sentences involving quantifiers into predicate logic?",
+   "How do you solve cryptarithmetic puzzles using constraints and substitutions?",
+   "How are heuristic values evaluated for state spaces in puzzle problems?",
+   "How are heuristic values assigned to nodes in a search graph?",
+   "How do you prove a goal statement using resolution refutation?"
+  ],
+  "ms_per_query": 3333.8417823508603
+ },
+ "refusal_rate": 1.0
+}

@@ -1,0 +1,121 @@
+# 📚 AI Exam Prep Assistant
+
+Turn your course notes — **even handwritten, photographed ones** — into a personal exam tutor.
+
+- 💬 **Ask** questions and get answers written *only* from your notes, with page numbers
+- 📝 **Quiz** yourself with MCQs generated from your notes and fact-checked by a second AI pass
+- 🎯 **Important topics**: finds every exam question in your notes/past papers, groups similar
+  ones and tells you what to study first
+
+If something isn't in your notes, it says so instead of making it up.
+
+## Results (measured, not guessed)
+
+Evaluated with [`levels/level6_evaluate.py`](levels/level6_evaluate.py) on 34 test questions
+over 43 pages of handwritten AI-course notes:
+
+| Retrieval setup | Hit@1 | Hit@5 | MRR |
+|---|---|---|---|
+| Vector search only (basic RAG) | 41% | 71% | 0.52 |
+| + BM25 hybrid search | 41% | 76% | 0.55 |
+| + small re-ranker (MiniLM) | 44% | 85% | 0.60 |
+| **+ bge-reranker-base (this app)** | **53%** | **85%** | **0.67** |
+
+- **Hit@1** = the right page is the #1 result, **Hit@5** = it's in the top 5 the LLM reads,
+  **MRR** = mean reciprocal rank (1.0 = perfect).
+- **Hallucination test:** 5/5 off-topic questions correctly refused (100%).
+- Bigger embedding model (bge-base) was also tested: no gain at Hit@1, so the small one is kept.
+
+## How it works
+
+```
+PDF ─► text layer? ──no──► Gemini vision OCR (keeps line structure) ─► cache
+              │yes                                                   │
+              └──────────────────► page texts ◄──────────────────────┘
+                                       │
+                         overlapping chunks (800 chars, 150 overlap)
+                       ┌───────────────┴───────────────┐
+            bge-small embeddings + FAISS          BM25 keyword index
+                       └──── Reciprocal Rank Fusion ───┘
+ Question ────────────────────────►│
+                        top 15 ─► cross-encoder re-ranker ─► top 5
+                                                              │
+               Gemini answers ONLY from these 5, citing pages ◄┘
+
+Quiz:   top chunks ─► Gemini writes MCQs (JSON schema) ─► Gemini checks each answer key
+Topics: Gemini extracts exam questions ─► embeddings ─► Agglomerative Clustering ─► ranking
+```
+
+## Tech stack
+
+| Part | Tool |
+|---|---|
+| UI | Streamlit, Altair |
+| LLM, OCR, structured output | Google Gemini (free tier) |
+| Embeddings | `BAAI/bge-small-en-v1.5` (local) |
+| Vector index | FAISS |
+| Keyword search | BM25 (`rank-bm25`) |
+| Re-ranker | `BAAI/bge-reranker-base` (local) |
+| Clustering | scikit-learn Agglomerative Clustering |
+| PDF | pypdf, pypdfium2 |
+
+## Run locally
+
+```bash
+python -m venv .venv          # tip: keep it outside OneDrive/Dropbox folders to save cloud space
+.venv\Scripts\activate        # Windows  (macOS/Linux: source .venv/bin/activate)
+pip install -r requirements.txt
+copy .env.example .env        # then put your free Gemini API key in .env
+streamlit run app.py
+```
+
+Get a free Gemini API key at https://aistudio.google.com/apikey. Put your PDFs in the project
+folder (loaded automatically) or upload them in the sidebar. First start takes ~1 minute while
+the local models load.
+
+## Deploy (free)
+
+**Streamlit Community Cloud**: push this repo to GitHub → [share.streamlit.io](https://share.streamlit.io)
+→ *Create app* → pick the repo and `app.py` → *Advanced settings → Secrets*:
+
+```toml
+GEMINI_API_KEY = "your-key"
+# If the app runs out of memory, use the smaller re-ranker:
+# RERANK_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+```
+
+**Hugging Face Spaces** (more RAM) works too: create a Docker/Streamlit Space, upload these
+files and add `GEMINI_API_KEY` as a secret.
+
+## Learning path (`levels/`)
+
+| Level | Where | Concept |
+|---|---|---|
+| 0 | `levels/level0_hello_ai.py` | Calling an LLM API safely (keys in `.env`) |
+| 1 | `levels/level1_read_pdf.py` | PDF text extraction, vision OCR, chunking |
+| 2 | `levels/level2_search.py` | Embeddings, cosine similarity, FAISS |
+| 3 | `rag.py` → `answer()` | RAG: hybrid search, re-ranking, grounded answers with citations |
+| 4 | `rag.py` → `make_quiz()` | Structured output (Pydantic schema), LLM-as-a-judge verification |
+| 5 | `rag.py` → `find_topics()` | Information extraction + Agglomerative Clustering |
+| 6 | `levels/level6_evaluate.py` | Evaluation: synthetic test set, Hit@k, MRR, hallucination test |
+| 7 | this README | Deployment, documentation |
+
+## Challenges solved
+
+- **Handwritten notes had no text layer** → Gemini vision OCR, cached so each PDF is read once.
+- **Acronyms like "PEAS" were missed** by embedding search → hybrid BM25 + vector search and a
+  re-ranker. Measured: Hit@5 71% → 85%.
+- **Quiz answer keys were wrong** ("ChatGPT" attached to the wrong agent type) → root cause was
+  flattening OCR text into one line, which lost which bullet belonged to which heading. Fixed by
+  keeping line structure; a verification pass was added as a second safety net.
+- **Choosing models by data, not guesswork** → compared 2 embedding × 2 re-ranker models; the
+  larger re-ranker raised Hit@1 from 44% to 53%, the larger embedder added nothing.
+- **Free-tier limits** (429/503 errors, a retired model name) → automatic retry with backoff
+  and a `-latest` model alias.
+
+## Limitations & future work
+
+- Questions spanning many pages (e.g. "how are heuristic values assigned") are harder to pin
+  to one page; page-level grouping or larger chunks could help.
+- Diagrams are described in text by OCR but not searchable as images.
+- Answer quality is checked by refusal tests; an LLM-judged faithfulness score is a next step.
