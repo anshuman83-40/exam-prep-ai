@@ -1,5 +1,8 @@
 # 📚 AI Exam Prep Assistant
 
+**Live demo: [exam-prep-ai-an.streamlit.app](https://exam-prep-ai-an.streamlit.app)** — enter your
+name, upload your notes PDF, and start asking questions.
+
 Turn your course notes — **even handwritten, photographed ones** — into a personal exam tutor.
 
 - 🏠 **Overview dashboard** (dark glass UI, works on phone and laptop): study schedule up to
