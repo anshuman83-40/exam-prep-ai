@@ -6,6 +6,9 @@ Turn your course notes — **even handwritten, photographed ones** — into a pe
 - 📝 **Quiz** yourself with MCQs generated from your notes and fact-checked by a second AI pass
 - 🎯 **Important topics**: finds every exam question in your notes/past papers, groups similar
   ones and tells you what to study first
+- 🗺️ **Study plan**: upload your course handout/syllabus and previous year papers (PYQs) and get
+  a **priority table** — which unit to start with, its PYQ **weightage %**, marks, how many papers
+  asked it, and High/Medium/Low priority (downloadable as CSV)
 
 If something isn't in your notes, it says so instead of making it up.
 
@@ -44,7 +47,15 @@ PDF ─► text layer? ──no──► Gemini vision OCR (keeps line structure
 
 Quiz:   top chunks ─► Gemini writes MCQs (JSON schema) ─► Gemini checks each answer key
 Topics: Gemini extracts exam questions ─► embeddings ─► Agglomerative Clustering ─► ranking
+Plan:   syllabus ─► units + topics (JSON)   PYQs ─► questions + marks (JSON)
+        each question ─► Gemini classifies into a unit ─► weightage = unit marks / all marks
 ```
+
+**Study plan ranking:** units are ordered by PYQ weightage (share of marks; question count if the
+papers show no marks), then by how many papers asked them. Priority is **High** if a unit's share is
+≥ 1.25× the average unit share, **Low** if ≤ 0.6×, otherwise **Medium**. Without PYQs it falls back
+to lecture hours from the handout, then to syllabus order. Put files in `syllabus/` and `pyqs/` to
+load them automatically, or upload them in the app.
 
 ## Tech stack
 
@@ -97,6 +108,7 @@ files and add `GEMINI_API_KEY` as a secret.
 | 3 | `rag.py` → `answer()` | RAG: hybrid search, re-ranking, grounded answers with citations |
 | 4 | `rag.py` → `make_quiz()` | Structured output (Pydantic schema), LLM-as-a-judge verification |
 | 5 | `rag.py` → `find_topics()` | Information extraction + Agglomerative Clustering |
+| 5+ | `rag.py` → `study_plan()` | Syllabus parsing, LLM classification, weightage analysis |
 | 6 | `levels/level6_evaluate.py` | Evaluation: synthetic test set, Hit@k, MRR, hallucination test |
 | 7 | this README | Deployment, documentation |
 

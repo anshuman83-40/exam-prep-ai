@@ -363,6 +363,10 @@ List EVERY exam-style question in them: lines starting with "Q.", "Q1", "Ques", 
 past-paper questions, or lines the teacher marked as exam questions (e.g. with "(4 marks)",
 "(exam)", "PYQ", "IMP"). Do NOT invent questions from ordinary notes.
 Ignore worked numerical answers; keep only the question itself.
+Marks: use the marks written next to a question ("(5)", "[10M]", "5 marks"); if a section says
+"each question carries N marks" or "N x M = total", give each question in it N marks.
+For "a)/b)" sub-parts with their own marks, list each sub-part separately.
+For "Q3 OR Q4" choices, list both.
 
 {pages}"""
 
@@ -448,3 +452,142 @@ def find_topics(questions: list[dict], embedder: SentenceTransformer,
             "questions": sorted(qs, key=lambda q: -q["marks"]),
         })
     return sorted(topics, key=lambda t: -t["score"])
+
+
+# ---------- Study plan: syllabus + PYQs -> chapter priority & weightage ----------
+
+class Unit(BaseModel):
+    number: int = Field(description="unit/chapter number as in the syllabus, 1-based")
+    title: str
+    topics: list[str] = Field(description="the topics listed under this unit")
+    hours: int = Field(description="lecture hours/lectures for the unit if listed, else 0")
+
+
+class Syllabus(BaseModel):
+    course: str = Field(description="course name/code, or '' if not found")
+    units: list[Unit]
+
+
+SYLLABUS_PROMPT = """Below is a course handout / syllabus. List the course's units (or chapters /
+modules / lessons) in order, with the topics under each and the lecture hours if given.
+Only include teaching units, not evaluation schemes, reference books or lab lists.
+
+{pages}"""
+
+
+class Mapping(BaseModel):
+    question_number: int
+    unit_number: int = Field(description="the unit the question belongs to; 0 if it fits none")
+
+
+class Mappings(BaseModel):
+    mappings: list[Mapping]
+
+
+MAP_PROMPT = """Match each exam question to the syllabus unit it tests. Use the unit's topics,
+not just its title. If a question clearly fits no unit, use 0.
+
+Syllabus units:
+{units}
+
+Questions:
+{questions}"""
+
+
+def extract_syllabus(data: bytes, pages: list[str]) -> dict:
+    """Ask Gemini for the units/chapters (with topics + hours) in a course handout. Cached."""
+    cache_file = CACHE_DIR / f"{hashlib.sha1(data).hexdigest()[:16]}.syllabus.json"
+    if cache_file.exists():
+        return json.loads(cache_file.read_text(encoding="utf-8"))
+    text = "\n\n".join(f"=== Page {i} ===\n{t}" for i, t in enumerate(pages, start=1))
+    raw = generate(
+        get_client(), SYLLABUS_PROMPT.format(pages=text),
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json", response_schema=Syllabus),
+    )
+    syllabus = Syllabus.model_validate_json(raw).model_dump()
+    CACHE_DIR.mkdir(exist_ok=True)
+    cache_file.write_text(json.dumps(syllabus, ensure_ascii=False, indent=1), encoding="utf-8")
+    return syllabus
+
+
+def map_questions(questions: list[dict], units: list[dict], batch: int = 60) -> list[int]:
+    """Classify each question into a syllabus unit number (0 = not in syllabus)."""
+    unit_text = "\n".join(f"Unit {u['number']}: {u['title']} — {', '.join(u['topics'])}"
+                          for u in units)
+    valid = {u["number"] for u in units}
+    result = [0] * len(questions)
+    client = get_client()
+    for start in range(0, len(questions), batch):
+        part = questions[start:start + batch]
+        listing = "\n".join(f"{i}. {q['question']}" for i, q in enumerate(part, start=1))
+        raw = generate(
+            client, MAP_PROMPT.format(units=unit_text, questions=listing),
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json", response_schema=Mappings),
+        )
+        for m in Mappings.model_validate_json(raw).mappings:
+            if 1 <= m.question_number <= len(part):
+                result[start + m.question_number - 1] = m.unit_number if m.unit_number in valid else 0
+    return result
+
+
+def study_plan(syllabus: dict, papers: dict[str, list[dict]]) -> dict:
+    """Combine the syllabus with PYQ papers ({paper name: questions}) into a priority table.
+
+    Weightage = the unit's share of all PYQ marks (question count if papers show no marks).
+    Ranking: weightage, then how many papers asked it; without PYQs, lecture hours; without
+    hours, syllabus order. Priority: High if weightage >= 1.25x the average unit share,
+    Low if <= 0.6x, else Medium."""
+    units = syllabus["units"]
+    questions = [{**q, "paper": name} for name, qs in papers.items() for q in qs]
+    unit_of = map_questions(questions, units) if questions and units else []
+    marked = [q["marks"] for q in questions if q["marks"] > 0]
+    use_marks = bool(marked)
+    avg_marks = sum(marked) / len(marked) if marked else 1
+
+    def weight(q):  # a question without marks counts as an average question
+        if not use_marks:
+            return 1
+        return q["marks"] or avg_marks
+
+    total = sum(weight(q) for q, u in zip(questions, unit_of) if u) or 0
+    total_hours = sum(u["hours"] for u in units)
+    rows = []
+    for u in units:
+        qs = [q for q, n in zip(questions, unit_of) if n == u["number"]]
+        share = (sum(weight(q) for q in qs) / total if total
+                 else u["hours"] / total_hours if total_hours else 0)
+        asked_in = len({q["paper"] for q in qs})
+        rows.append({
+            "unit": u["number"], "title": u["title"], "topics": u["topics"], "hours": u["hours"],
+            "questions": sorted(qs, key=lambda q: -q["marks"]), "n_questions": len(qs),
+            "marks": sum(q["marks"] for q in qs), "weightage": share, "asked_in": asked_in,
+        })
+
+    basis = "pyq" if total else "hours" if total_hours else "order"
+    rows.sort(key=lambda r: (-r["weightage"], -r["asked_in"], r["unit"]))
+    avg = 1 / len(rows) if rows else 0
+    for order, r in enumerate(rows, start=1):
+        r["order"] = order
+        if basis == "order":
+            r["priority"] = "Medium"
+        elif r["weightage"] >= 1.25 * avg:
+            r["priority"] = "High"
+        elif r["weightage"] <= 0.6 * avg:
+            r["priority"] = "Low"
+        else:
+            r["priority"] = "Medium"
+        if basis == "pyq":
+            r["why"] = (f"{r['weightage']:.0%} of PYQ {'marks' if use_marks else 'questions'}, "
+                        f"asked in {r['asked_in']}/{len(papers)} paper(s)" if r["n_questions"]
+                        else "not asked in these papers")
+        elif basis == "hours":
+            r["why"] = f"{r['hours']} lecture hours ({r['weightage']:.0%} of course)"
+        else:
+            r["why"] = "syllabus order (add PYQs for weightage)"
+
+    unmapped = [q for q, n in zip(questions, unit_of) if n == 0]
+    return {"course": syllabus.get("course", ""), "rows": rows, "basis": basis,
+            "papers": len(papers), "n_questions": len(questions), "total_marks":
+            sum(q["marks"] for q in questions), "unmapped": unmapped, "use_marks": use_marks}
