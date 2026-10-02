@@ -95,8 +95,9 @@ div[data-testid="stChatInput"] textarea { min-height: 0 !important; }
        box-shadow: 0 0 45px rgba(139,92,246,.75), inset -12px -16px 30px rgba(0,0,0,.45);
        animation: float 5s ease-in-out infinite; }
 @keyframes float { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-8px) } }
-.hello { font-size: 1.5rem; font-weight: 700; margin: 0; }
-.hello-emoji { font-size: 4.2rem; text-align: right; line-height: 1; }
+.hello { font-size: clamp(1.15rem, 1.6vw, 1.5rem); font-weight: 700; margin: 0;
+         word-break: keep-all; overflow-wrap: normal; }
+.hello-emoji { font-size: clamp(2.6rem, 4vw, 4.2rem); text-align: right; line-height: 1; }
 .lesson-title { font-weight: 600; margin-bottom: .25rem; }
 .bar { height: 6px; border-radius: 999px; background: rgba(255,255,255,.12); overflow: hidden; }
 .bar > div { height: 100%; border-radius: 999px; background: linear-gradient(90deg,#c4b5fd,#fff); }
@@ -389,7 +390,7 @@ if page == HOME:
     # ----- right: greeting + AI assistant -----
     with right:
         with st.container(border=True):
-            a, b = st.columns([2, 1], vertical_alignment="center")
+            a, b = st.columns([3, 1], vertical_alignment="center")
             next_up = next((u for u in plan_rows if u["title"] not in progress["units_done"]), None)
             a.markdown(f"<div class='hello'>Hi, {html.escape(progress['name'])}!</div>"
                        f"<div class='stat-sub' style='font-size:.95rem'>Ready to make progress today?"
