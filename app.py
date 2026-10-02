@@ -23,11 +23,7 @@ st.set_page_config(page_title="AI Exam Prep Assistant", page_icon=":material/sch
 # this adds the gradient background, glass cards, pill buttons and the dashboard widgets.
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700&display=swap');
-html, body, [class*="st-"], button, input, textarea { font-family: 'Exo 2', sans-serif; }
-/* keep Streamlit's icon font for icons (otherwise they show as words like "arrow_right") */
-span[data-testid="stIconMaterial"], [class*="material-symbols"], .material-icons {
-  font-family: 'Material Symbols Rounded' !important; }
+/* the Exo 2 font is set in .streamlit/config.toml so icons keep their own icon font */
 .stApp {
   background:
     radial-gradient(1200px 600px at 85% -10%, rgba(124,58,237,.35), transparent 60%),
@@ -64,6 +60,12 @@ section[data-testid="stSidebar"] {
 }
 .stButton button[kind="secondary"]:hover { background: #fff; color: #5b21b6; }
 .stButton button[kind="tertiary"] { color: #c4b5fd; }
+/* sidebar buttons: subtle dark pills instead of bright white ones */
+section[data-testid="stSidebar"] .stButton button[kind="secondary"] {
+  background: rgba(255,255,255,.06); color: #ede9fe; border: 1px solid rgba(255,255,255,.12);
+}
+section[data-testid="stSidebar"] .stButton button[kind="secondary"]:hover {
+  background: rgba(139,92,246,.25); color: #fff; }
 
 /* section switcher looks like the app's top tabs */
 div[data-testid="stButtonGroup"] button { border-radius: 999px !important; }
@@ -81,6 +83,7 @@ div[data-testid="stChatInput"] textarea { min-height: 0 !important; }
         border:1px solid rgba(255,255,255,.08); font-size:.85rem; }
 .avatar { width:30px; height:30px; border-radius:50%; display:inline-grid; place-items:center;
           background:linear-gradient(135deg,#f9a8d4,#a78bfa); font-weight:700; color:#1b1030; }
+.stat { text-align: center; margin-bottom: .5rem; }
 .stat-big { font-size: 1.7rem; font-weight: 700; line-height: 1.1; }
 .stat-sub { font-size: .78rem; opacity: .65; }
 .up { color: #4ade80; font-size: .72rem; } .down { color: #f87171; font-size: .72rem; }
@@ -330,7 +333,8 @@ with st.container(border=True):
     c3.markdown(
         f"<div style='text-align:right'><span class='chip'>{mi('description')} {total_pages} pages</span> "
         f"<span class='chip'><span class='avatar'>{initial}</span>"
-        f"<span><b>{html.escape(progress['name'])}</b><br><small>AI course</small></span></span></div>",
+        f"<span><b>{html.escape(progress['name'])}</b><br>"
+        f"<small>{html.escape(progress.get('course') or 'Student')}</small></span></span></div>",
         unsafe_allow_html=True)
     st.segmented_control("Section", PAGES, key="page", label_visibility="collapsed")
 st.write("")
@@ -402,10 +406,10 @@ if page == HOME:
         last_mock = progress["mocks"][-1] if progress["mocks"] else None
         mock_text = f"{last_mock['scored']:g}/{last_mock['total']}" if last_mock else "—"
         a, b = st.columns(2)
-        a.markdown(f"<div class='stat-big'>{n_due}</div><div class='stat-sub'>Flashcards due</div>",
-                   unsafe_allow_html=True)
-        b.markdown(f"<div class='stat-big'>{mock_text}</div>"
-                   f"<div class='stat-sub'>Last mock exam</div>", unsafe_allow_html=True)
+        a.markdown(f"<div class='stat'><div class='stat-big'>{n_due}</div>"
+                   f"<div class='stat-sub'>Flashcards due</div></div>", unsafe_allow_html=True)
+        b.markdown(f"<div class='stat'><div class='stat-big'>{mock_text}</div>"
+                   f"<div class='stat-sub'>Last mock exam</div></div>", unsafe_allow_html=True)
         a.button("Review", icon=":material/style:", width="stretch", on_click=go, args=(CARDS,),
                  key="dash_cards")
         b.button("Take a mock", icon=":material/assignment:", width="stretch", on_click=go,
@@ -416,12 +420,12 @@ if page == HOME:
         acc = prog.accuracy(progress)
         with st.container(border=True):
             a, b = st.columns(2)
-            a.markdown(f"<div style='text-align:center'><div class='stat-big'>{prog.points(progress)}"
-                       f"</div><div class='stat-sub'>Quiz points</div>"
+            acc_text = f"{acc:.0%}" if acc is not None else "—"
+            a.markdown(f"<div class='stat'><div class='stat-big'>{prog.points(progress)}</div>"
+                       f"<div class='stat-sub'>Quiz points</div>"
                        f"<div class='up'>{len(progress['quizzes'])} quizzes taken</div></div>",
                        unsafe_allow_html=True)
-            b.markdown(f"<div style='text-align:center'><div class='stat-big'>"
-                       f"{f'{acc:.0%}' if acc is not None else '—'}</div>"
+            b.markdown(f"<div class='stat'><div class='stat-big'>{acc_text}</div>"
                        f"<div class='stat-sub'>Accuracy</div>"
                        f"<div class='up'>{progress['asked']} questions asked</div></div>",
                        unsafe_allow_html=True)
@@ -977,6 +981,7 @@ if page == PLAN:
             # remember the ranking for the Overview schedule and progress ring
             progress["plan"] = [{k: r[k] for k in ("unit", "title", "weightage", "priority", "order")}
                                 for r in st.session_state.plan["rows"]]
+            progress["course"] = st.session_state.plan["course"]
             prog.save(progress)
         except Exception as e:
             st.error(f"Couldn't build the plan: {e}", icon=":material/error:")

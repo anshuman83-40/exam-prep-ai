@@ -6,6 +6,10 @@ headless = true
 [browser]
 gatherUsageStats = false
 
+[client]
+# hide developer items like the "Deploy" button — students don't need them
+toolbarMode = "minimal"
+
 [theme]
 base = "dark"
 primaryColor = "#8b5cf6"
@@ -13,3 +17,5 @@ backgroundColor = "#0b0715"
 secondaryBackgroundColor = "#1a1030"
 textColor = "#ede9fe"
 baseRadius = "large"
+# set the font here (not with CSS) so Streamlit keeps its own icon font for icons
+font = "'Exo 2':https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700&display=swap"
