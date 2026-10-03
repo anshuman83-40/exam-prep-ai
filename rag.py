@@ -22,6 +22,7 @@ import pypdfium2 as pdfium
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from PIL import Image, ImageOps
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
 from rank_bm25 import BM25Okapi
@@ -125,9 +126,44 @@ class PageTexts(BaseModel):
     pages: list[str]
 
 
+MAX_SIDE = 2000  # px on the long side: plenty to read handwriting, small enough for any server
+
+
 def page_image(doc, i: int) -> types.Part:
+    """Render one PDF page as a JPEG for OCR. The zoom is capped by pixel size, because
+    phone-scanner PDFs use huge pages (e.g. 3024x4032): rendering those at a fixed 2x zoom
+    needs ~200 MB per page and can crash a small server."""
+    width, height = doc[i].get_size()
+    scale = min(2.0, MAX_SIDE / max(width, height, 1))
     buf = io.BytesIO()
-    doc[i].render(scale=2).to_pil().convert("RGB").save(buf, format="JPEG", quality=85)
+    doc[i].render(scale=scale).to_pil().convert("RGB").save(buf, format="JPEG", quality=85)
+    return types.Part.from_bytes(data=buf.getvalue(), mime_type="image/jpeg")
+
+
+def file_kind(data: bytes) -> str | None:
+    """'pdf', an image MIME type (photos of notes/papers), or None for anything else.
+    Checked from the file's content, not its name: phones often give odd names/types."""
+    if b"%PDF" in data[:1024]:
+        return "pdf"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[4:8] == b"ftyp" and data[8:12] in (b"heic", b"heix", b"heif", b"mif1", b"msf1", b"hevc"):
+        return "image/heic"  # iPhone photos
+    return None
+
+
+def photo_part(data: bytes, kind: str) -> types.Part:
+    """A photo ready for OCR: turned upright (phones store rotation separately) and shrunk."""
+    if kind == "image/heic":  # Gemini reads HEIC directly; Pillow can't open it
+        return types.Part.from_bytes(data=data, mime_type=kind)
+    image = ImageOps.exif_transpose(Image.open(io.BytesIO(data))).convert("RGB")
+    image.thumbnail((MAX_SIDE, MAX_SIDE))
+    buf = io.BytesIO()
+    image.save(buf, format="JPEG", quality=85)
     return types.Part.from_bytes(data=buf.getvalue(), mime_type="image/jpeg")
 
 
@@ -157,15 +193,26 @@ def read_pages(data: bytes, on_progress=None) -> list[str]:
 
     Every finished page is saved straight away (notes_text/<hash>.partial.json), so if the
     run is interrupted (phone screen locks, user taps elsewhere) it resumes where it stopped.
-    The finished result is cached by file content, so each PDF is only OCR'd once."""
+    The finished result is cached by file content, so each PDF is only OCR'd once.
+    A photo (JPG/PNG/WEBP/HEIC) is read as a single page."""
     digest = hashlib.sha1(data).hexdigest()[:16]
     cache_file = CACHE_DIR / f"{digest}.json"
     if cache_file.exists():
         return json.loads(cache_file.read_text(encoding="utf-8"))
 
+    kind = file_kind(data)
+    if kind is None:
+        raise ValueError("this file isn't a PDF or a photo (JPG, PNG, HEIC)")
+    CACHE_DIR.mkdir(exist_ok=True)
+    if kind != "pdf":
+        if on_progress:
+            on_progress(0, 1)
+        pages = [clean(generate(get_client(), [photo_part(data, kind), OCR_PROMPT]))]
+        cache_file.write_text(json.dumps(pages, ensure_ascii=False), encoding="utf-8")
+        return pages
+
     pages = [clean(p.extract_text() or "") for p in PdfReader(io.BytesIO(data)).pages]
     empty = [i for i, t in enumerate(pages) if not t]
-    CACHE_DIR.mkdir(exist_ok=True)
     if empty:
         partial_file = CACHE_DIR / f"{digest}.partial.json"
         try:
@@ -778,9 +825,9 @@ def make_mock_exam(kb: KnowledgeBase, pattern: list[tuple[int, int]],
     return {"questions": out, "chunks": [(c.source, c.page, c.text) for c in chunks]}
 
 
-def transcribe_answer(image: bytes, mime: str) -> str:
+def transcribe_answer(image: bytes, kind: str) -> str:
     """Read a photo of a handwritten answer (exam answers are handwritten)."""
-    part = types.Part.from_bytes(data=image, mime_type=mime)
+    part = photo_part(image, kind)  # upright and shrunk, like note photos
     prompt = ("Transcribe this handwritten exam answer exactly, keeping its structure. "
               "Describe any diagram in one line as [Diagram: ...]. Output only the text.")
     return generate(get_client(), [part, prompt]).strip()
