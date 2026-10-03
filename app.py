@@ -1157,6 +1157,11 @@ if page == PLAN:
             st.success(f"Start with **Unit {top['unit']}: {top['title']}** — "
                        f"{top['weightage']:.0%} of the PYQ "
                        f"{'marks' if plan['use_marks'] else 'questions'}.", icon=":material/emoji_events:")
+        elif plan["papers"] and not plan["n_questions"]:
+            st.warning("No questions could be read from your PYQ file(s), so units are ranked "
+                       f"by **{'lecture hours' if plan['basis'] == 'hours' else 'syllabus order'}** "
+                       "for now. If it's a photo or scan, make sure the page is upright, in focus "
+                       "and well lit, then upload it again.", icon=":material/warning:")
         elif plan["basis"] == "hours":
             st.info("No PYQs added, so units are ranked by **lecture hours**. "
                     "Add previous year papers for real exam weightage.", icon=":material/info:")
