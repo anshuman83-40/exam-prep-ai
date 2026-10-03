@@ -205,3 +205,7 @@ def schedule(plan: list[dict], exam: date, today: date | None = None) -> dict[da
     if (exam - today).days >= 1:
         out[exam - timedelta(days=1)] = [{"title": "Revision + PYQ practice", "revision": True}]
     return out
+
+
+# when this file was loaded: app.py reloads the module if the file on disk changes (new deploy)
+LOADED_MTIME = os.path.getmtime(__file__)

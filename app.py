@@ -1,8 +1,10 @@
 """AI Exam Prep Assistant — chat with your notes. Run with: streamlit run app.py"""
 
 import html
+import importlib
 import os
 import re
+import sys
 from datetime import date, datetime, timedelta
 
 import altair as alt
@@ -11,8 +13,17 @@ import streamlit as st
 from dotenv import load_dotenv
 from sentence_transformers import CrossEncoder, SentenceTransformer
 
-import progress as prog
-from rag import (EMBED_MODEL, PROJECT_DIR, RERANK_MODEL, KnowledgeBase, answer, extract_questions,
+# Streamlit re-runs this file on every update but keeps imported modules in memory (the file
+# watcher is off for speed), so after a deploy the old rag.py/progress.py would keep running.
+# Reload them whenever their file on disk is newer than the copy in memory.
+for _name in ("rag", "progress"):
+    _module = sys.modules.get(_name)
+    if _module is not None and getattr(_module, "LOADED_MTIME", None) != os.path.getmtime(_module.__file__):
+        importlib.reload(_module)
+
+import progress as prog  # noqa: E402  (must come after the reload above)
+from rag import (  # noqa: E402
+    EMBED_MODEL, PROJECT_DIR, RERANK_MODEL, KnowledgeBase, answer, extract_questions,
                  extract_syllabus, file_kind, find_topics, grade_exam, make_chunks, make_flashcards,
                  make_mock_exam, make_quiz, read_pages, study_plan, transcribe_answer)
 
