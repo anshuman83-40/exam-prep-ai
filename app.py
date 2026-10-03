@@ -13,7 +13,7 @@ from sentence_transformers import CrossEncoder, SentenceTransformer
 
 import progress as prog
 from rag import (EMBED_MODEL, PROJECT_DIR, RERANK_MODEL, KnowledgeBase, answer, extract_questions,
-                 extract_syllabus, find_topics, grade_exam, make_chunks, make_flashcards,
+                 extract_syllabus, file_kind, find_topics, grade_exam, make_chunks, make_flashcards,
                  make_mock_exam, make_quiz, read_pages, study_plan, transcribe_answer)
 
 load_dotenv(PROJECT_DIR / ".env")
@@ -281,6 +281,20 @@ def add_pdf(name: str, data: bytes):
     st.session_state.pop("topics", None)  # new file -> topic analysis is out of date
 
 
+def uploaded_bytes(f) -> bytes | None:
+    """The uploaded file's content if it's a PDF or a photo, else a clear message.
+
+    Upload boxes accept any file (type=None): a ".pdf" filter makes some phone file pickers
+    grey out PDFs shared from WhatsApp/Drive (they arrive with a generic file type), so
+    files are checked here by content instead of by name."""
+    data = f.getvalue()
+    if file_kind(data) is None:
+        st.warning(f"**{f.name}** isn't a PDF or a photo, so it can't be read. Upload a PDF, "
+                   "or a photo (JPG, PNG, HEIC) of the page.", icon=":material/warning:")
+        return None
+    return data
+
+
 def queue_pdf(name: str, data: bytes):
     """Remember an uploaded notes PDF until it's read. Kept in the session (not in the upload
     widget), so switching sections or a phone interrupting the page doesn't lose it."""
@@ -350,9 +364,10 @@ with st.sidebar:
     # PDFs already in the project folder are loaded automatically
     for pdf in sorted(PROJECT_DIR.glob("*.pdf")):
         add_pdf(pdf.name, pdf.read_bytes())
-    for f in st.file_uploader("Add notes or past papers (PDF)", type="pdf",
+    for f in st.file_uploader("Add notes (PDF or photos)", type=None,
                               accept_multiple_files=True) or []:
-        queue_pdf(f.name, f.getvalue())
+        if (data := uploaded_bytes(f)) is not None:
+            queue_pdf(f.name, data)
 
     st.markdown("**Loaded**")
     for name, info in st.session_state.files.items():
@@ -402,7 +417,8 @@ def search_notes():
 
 
 page = st.session_state.get("page") or HOME  # clicking the selected button again deselects it
-process_pending()  # read uploaded notes first: progress shows at the top of any page, counts stay right
+if page != PLAN:  # (the Study plan reads its own files first, then any pending notes)
+    process_pending()  # read uploaded notes first: progress shows at the top, counts stay right
 total_pages = sum(f["pages"] for f in st.session_state.files.values())
 
 with st.container(border=True):
@@ -433,11 +449,14 @@ if not st.session_state.files and page != PLAN:
         a.caption("Have a course handout/syllabus or previous year papers? They go in Study plan.")
         b.button("Open Study plan", icon=":material/map:", key="to_plan", width="stretch",
                  on_click=go, args=(PLAN,))
-        new_files = st.file_uploader("Notes (PDF)", type="pdf", accept_multiple_files=True,
+        new_files = st.file_uploader("Notes (PDF or photos)", type=None, accept_multiple_files=True,
                                      key="main_upload", label_visibility="collapsed") or []
+        queued = False
         for f in new_files:
-            queue_pdf(f.name, f.getvalue())
-        if new_files:
+            if (data := uploaded_bytes(f)) is not None and f.name not in st.session_state.files:
+                queue_pdf(f.name, data)
+                queued = True
+        if queued:
             st.rerun()  # read them at the top of the page (process_pending), with progress
     if page != HOME:
         st.stop()
@@ -810,7 +829,7 @@ if page == EXAM:
                                  height=90 if q["marks"] <= 3 else 220,
                                  label_visibility="collapsed", placeholder="Write your answer...")
                     st.file_uploader("…or upload a photo of your handwritten answer",
-                                     type=["jpg", "jpeg", "png"], key=f"img{i}-{exam['id']}")
+                                     type=None, key=f"img{i}-{exam['id']}")
             submit = st.form_submit_button("Submit for grading", icon=":material/grading:",
                                            type="primary", width="stretch")
         if submit:
@@ -820,8 +839,9 @@ if page == EXAM:
                     for i in range(1, len(qs) + 1):
                         text = st.session_state.get(f"ans{i}-{exam['id']}") or ""
                         img = st.session_state.get(f"img{i}-{exam['id']}")
-                        if img is not None:
-                            text = (text + "\n" + transcribe_answer(img.getvalue(), img.type)).strip()
+                        kind = file_kind(img.getvalue()) if img is not None else None
+                        if kind and kind != "pdf":
+                            text = (text + "\n" + transcribe_answer(img.getvalue(), kind)).strip()
                         answers.append(text)
                     exam["answers"] = answers
                     exam["results"] = grade_exam(exam, answers)
@@ -1046,13 +1066,19 @@ if page == PLAN:
                    "Each PYQ question is matched to a syllabus unit to work out its weightage. "
                    "Scanned papers work too.")
         c1, c2 = st.columns(2)
-        syl = c1.file_uploader("Course handout / syllabus", type="pdf", key="syl_up")
-        pyqs = c2.file_uploader("Previous year papers (PYQs)", type="pdf",
+        syl = c1.file_uploader("Course handout / syllabus (PDF or photo)", type=None, key="syl_up")
+        pyqs = c2.file_uploader("Previous year papers (PDF or photos)", type=None,
                                 accept_multiple_files=True, key="pyq_up")
-        if syl:
-            st.session_state.plan_syllabus = (syl.name, syl.getvalue())
+        # Copy uploads into the session straight away (they survive switching sections) and
+        # confirm each new file instantly, so it's clear on a phone that the upload arrived.
+        if syl and (data := uploaded_bytes(syl)) is not None \
+                and st.session_state.plan_syllabus != (syl.name, data):
+            st.session_state.plan_syllabus = (syl.name, data)
+            st.toast(f"Got {syl.name} — building your plan…", icon=":material/check_circle:")
         for f in pyqs or []:
-            st.session_state.plan_pyqs[f.name] = f.getvalue()
+            if (data := uploaded_bytes(f)) is not None and st.session_state.plan_pyqs.get(f.name) != data:
+                st.session_state.plan_pyqs[f.name] = data
+                st.toast(f"Got {f.name}", icon=":material/check_circle:")
 
         if st.session_state.plan_syllabus or st.session_state.plan_pyqs:
             chips = []
@@ -1201,3 +1227,5 @@ if page == PLAN:
             with st.expander(f"{len(plan['unmapped'])} question(s) didn't match any unit", icon=":material/warning:"):
                 for q in plan["unmapped"]:
                     st.markdown(f"- {plain(q['question'])} :gray-badge[{q['paper']}]")
+
+    process_pending()  # any notes uploaded elsewhere are read after the plan, not before it
