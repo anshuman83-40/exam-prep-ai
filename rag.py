@@ -900,3 +900,7 @@ def make_flashcards(topic: str, kb: KnowledgeBase, n: int = 10) -> list[dict]:
         out.append({"front": card.front.strip(), "back": card.back.strip(), "topic": topic,
                     "source": c.source, "page": c.page})
     return out
+
+
+# when this file was loaded: app.py reloads the module if the file on disk changes (new deploy)
+LOADED_MTIME = os.path.getmtime(__file__)
