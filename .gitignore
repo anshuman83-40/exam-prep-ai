@@ -6,9 +6,6 @@
 __pycache__/
 *.pyc
 
-# Local tool config
-.claude/
-
 # Personal study material: your notes PDFs and the text read from them.
 # Remove these lines only if you want them public in the repo / deployed demo.
 *.pdf
